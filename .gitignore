@@ -1,0 +1,5 @@
+/target
+/sql
+config.toml
+Cargo.lock
+outline.md
