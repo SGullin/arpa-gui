@@ -5,7 +5,8 @@ edition = "2024"
 authors = ["Samuel Gullin <gullin@ia.forth.gr>"]
 
 [dependencies]
-argos-arpa = "0.3.0"
+# argos-arpa = "0.3.0"
+argos-arpa = { path = "../arpa" }
 env_logger = "0.11.6"
 log = "0.4.25"
 tokio = { version = "1.43.0", features = ["full"] }

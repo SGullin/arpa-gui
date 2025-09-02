@@ -1,6 +1,6 @@
 use arpa::TableItem;
 
-use super::{ra_delete, IconicButton};
+use super::{IconicButton, ra_delete};
 
 pub struct Downloader<T> {
     data: Vec<T>,
@@ -11,7 +11,7 @@ pub struct Downloader<T> {
 }
 
 #[derive(PartialEq, Clone, Copy)]
-pub enum FetchType { 
+pub enum FetchType {
     All,
     Id(i32),
 }
@@ -23,7 +23,10 @@ pub enum DownloaderAction {
     Download(FetchType),
 }
 
-impl<T> Downloader<T> where T: TableItem {
+impl<T> Downloader<T>
+where
+    T: TableItem,
+{
     pub fn new() -> Self {
         Self {
             data: Vec::new(),
@@ -48,25 +51,24 @@ impl<T> Downloader<T> where T: TableItem {
             ui.add_space(12.0);
         });
     }
-    
-    fn download_menu(
-        &mut self, 
-        ui: &mut egui::Ui, 
-    ) {
+
+    fn download_menu(&mut self, ui: &mut egui::Ui) {
         ui.horizontal(|ui| {
             ui.set_height(IconicButton::HEIGHTS[1]);
 
             let download = match self.fetching {
-                true => ui.add_sized(
-                    [IconicButton::WIDTHS[1], IconicButton::HEIGHTS[1]], 
-                    egui::Spinner::new(),
-                ).on_hover_text("Synching..."),
-                
+                true => ui
+                    .add_sized(
+                        [IconicButton::WIDTHS[1], IconicButton::HEIGHTS[1]],
+                        egui::Spinner::new(),
+                    )
+                    .on_hover_text("Synching..."),
+
                 false => ui.add(
                     IconicButton::new("🔄")
-                    .enabled(!self.fetching)
-                    .on_hover_text("Download pulsars")
-                )
+                        .enabled(!self.fetching)
+                        .on_hover_text("Download pulsars"),
+                ),
             };
 
             ui.radio_value(&mut self.fetch_type, FetchType::All, "All");
@@ -77,13 +79,12 @@ impl<T> Downloader<T> where T: TableItem {
             };
             ui.radio_value(&mut self.fetch_type, FetchType::Id(id), "With ID");
             ui.add_enabled(
-                enabled, 
-                egui::DragValue::new(&mut id)
-                    .range(0..=0x7FFFFFFE),
+                enabled,
+                egui::DragValue::new(&mut id).range(1..=0x7FFF_FFFE),
             );
             match &mut self.fetch_type {
                 FetchType::Id(i) => *i = id,
-                _ => {},
+                _ => {}
             }
 
             if download.clicked() {
@@ -92,11 +93,9 @@ impl<T> Downloader<T> where T: TableItem {
             }
         });
     }
-    
+
     pub fn add(&mut self, item: T) {
-        let pos = self.data
-        .iter()
-        .position(|i| i.id() == item.id());
+        let pos = self.data.iter().position(|i| i.id() == item.id());
 
         match pos {
             Some(i) => self.data[i] = item,
@@ -119,16 +118,16 @@ impl<T> Downloader<T> where T: TableItem {
 
         match self.selected {
             Some(i) if i == index => self.selected = None,
-            _ => self.selected = Some(index)
+            _ => self.selected = Some(index),
         };
 
         self.selected
     }
-    
+
     pub fn selected(&self) -> Option<usize> {
         self.selected
     }
-    
+
     pub fn selected_id(&self) -> Option<i32> {
         self.selected.map(|i| self.data[i].id())
     }
@@ -136,7 +135,7 @@ impl<T> Downloader<T> where T: TableItem {
     pub fn deselect(&mut self) {
         self.selected = None;
     }
-    
+
     pub fn data(&self) -> &[T] {
         &self.data
     }

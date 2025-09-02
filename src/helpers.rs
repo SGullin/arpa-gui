@@ -1,9 +1,9 @@
-use std::fmt::Display;
 use egui::{Align, Layout, RichText, Ui};
+use std::fmt::Display;
 
 pub mod downloader;
 
-pub const MISSING_DATA: &'static str = "N/A";
+pub const MISSING_DATA: &str = "N/A";
 
 pub struct StatusMessage {
     pub severity: StatusMessageSeverity,
@@ -11,58 +11,61 @@ pub struct StatusMessage {
 }
 pub enum StatusMessageSeverity {
     Info,
+    Warning,
     Error,
 }
 impl StatusMessage {
     pub fn widget(&self) -> egui::Label {
-        egui::Label::new(
-            RichText::new(&self.message)
-            .color(match self.severity {
+        egui::Label::new(RichText::new(&self.message).color(
+            match self.severity {
                 StatusMessageSeverity::Info => egui::Color32::GREEN,
+                StatusMessageSeverity::Warning => egui::Color32::ORANGE,
                 StatusMessageSeverity::Error => egui::Color32::RED,
-            })
-        )
+            },
+        ))
     }
 }
 
-pub fn format_data_option<T>(data: &Option<T>) -> RichText where T: Display {
+pub fn format_data_option<T>(data: &Option<T>) -> RichText
+where
+    T: Display,
+{
     if let Some(value) = data.as_ref() {
         RichText::new(value.to_string()).strong()
-    }
-    else {
+    } else {
         RichText::new(MISSING_DATA)
     }
 }
 
-pub fn format_unique_data_option<T>(
-    data: &Option<T>,
-    other: &T,
-) -> RichText where T:PartialEq + ToString {
+pub fn format_unique_data_option<T>(data: &Option<T>, other: &T) -> RichText
+where
+    T: PartialEq + ToString,
+{
     match data {
-        Some(d) if other == d => 
-            RichText::new(d.to_string()).italics(),
-        Some(d) => 
-            RichText::new(d.to_string()).strong(),
-        None => 
-            RichText::new(MISSING_DATA),
+        Some(d) if other == d => RichText::new(d.to_string()).italics(),
+        Some(d) => RichText::new(d.to_string()).strong(),
+        None => RichText::new(MISSING_DATA),
     }
 }
 
 pub fn table_header(ui: &mut Ui, text: &str, hint: &str) -> bool {
     ui.set_height(IconicButton::HEIGHTS[0]);
 
-    ui.label(RichText::new(text)
-    .strong()
-    .text_style(egui::TextStyle::Button))
+    ui.label(
+        RichText::new(text)
+            .strong()
+            .text_style(egui::TextStyle::Button),
+    )
     .on_hover_text(hint);
 
-    ui.add(IconicButton::new("⏷").small().on_hover_text("Sort")).clicked()
+    ui.add(IconicButton::new("⏷").small().on_hover_text("Sort"))
+        .clicked()
 }
 
 /// Returns whether the data changed or not.
 pub fn enter_data_option(ui: &mut Ui, data: &mut Option<String>) -> bool {
     match data {
-        Some(str) => { 
+        Some(str) => {
             let tes = ui.text_edit_singleline(str);
             let changed = tes.changed();
 
@@ -74,36 +77,32 @@ pub fn enter_data_option(ui: &mut Ui, data: &mut Option<String>) -> bool {
             });
 
             changed
-        },
+        }
         None => {
             if ui.button("Set").clicked() {
                 *data = Some(String::new());
                 return true;
             }
             false
-        },
+        }
     }
 }
 
-pub fn confirm_button(
-    button: egui::response::Response,
-    caution: &str,
-) -> bool {
+pub fn confirm_button(button: egui::response::Response, caution: &str) -> bool {
     let mut confirmed = false;
-    egui::Popup::menu(&button)
-        .show(|ui| {
-            ui.set_min_width(120.0);
-            ui.label(caution);
-            ui.separator();
+    egui::Popup::menu(&button).show(|ui| {
+        ui.set_min_width(120.0);
+        ui.label(caution);
+        ui.separator();
 
-            if ui.button("Yes").clicked() {
-                confirmed = true;
-                ui.close();
-            }
-            if ui.button("No").clicked() {
-                ui.close();
-            }
-        });
+        if ui.button("Yes").clicked() {
+            confirmed = true;
+            ui.close();
+        }
+        if ui.button("No").clicked() {
+            ui.close();
+        }
+    });
 
     confirmed
 }
@@ -120,12 +119,13 @@ pub fn ra_delete(ui: &mut Ui, enabled: bool) -> bool {
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         let delete = ui.add(
             IconicButton::new("🗑")
-            .enabled(enabled)
-            .on_hover_text("Delete")
+                .enabled(enabled)
+                .on_hover_text("Delete"),
         );
 
         confirm_button(delete, "Delete selected?")
-    }).inner
+    })
+    .inner
 }
 
 pub struct IconicButton {
@@ -179,13 +179,14 @@ impl IconicButton {
 
 impl egui::Widget for IconicButton {
     fn ui(self, ui: &mut Ui) -> egui::Response {
-        let call = |ui: &mut Ui| ui.add_sized(
-            [Self::WIDTHS[self.size], Self::HEIGHTS[self.size]], 
-            egui::Button::new(
-                RichText::new(self.text)
-                .size(Self::SIZES[self.size])
+        let call = |ui: &mut Ui| {
+            ui.add_sized(
+                [Self::WIDTHS[self.size], Self::HEIGHTS[self.size]],
+                egui::Button::new(
+                    RichText::new(self.text).size(Self::SIZES[self.size]),
+                ),
             )
-        );
+        };
 
         let mut response = match self.enabled {
             Some(enabled) => ui.add_enabled_ui(enabled, call).inner,
@@ -193,16 +194,14 @@ impl egui::Widget for IconicButton {
         };
 
         if let Some(hint) = self.hint {
-            response = response
-            .on_hover_text(&hint)
-            .on_disabled_hover_text(hint)
+            response =
+                response.on_hover_text(&hint).on_disabled_hover_text(hint)
         }
-        
+
         if let Some(hint) = self.disabled_hint {
-            response = response
-            .on_disabled_hover_text(hint)
+            response = response.on_disabled_hover_text(hint)
         }
-        
+
         response
     }
 }

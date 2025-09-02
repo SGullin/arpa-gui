@@ -1,23 +1,18 @@
 //! A GUI for `argos-arpa`.
-//! 
-//! The intent is to cover most of the expected usage of the library, which 
-//! currently means: 
+//!
+//! The intent is to cover most of the expected usage of the library, which
+//! currently means:
 //!  - pulsar metadata management.
 
-#![warn(
-    missing_docs,
-    clippy::all,
-    clippy::pedantic,
-    clippy::nursery,
-)]
+#![warn(clippy::all, clippy::pedantic, clippy::nursery)]
 #![allow(clippy::must_use_candidate)]
 
 extern crate argos_arpa as arpa;
 
 pub mod app;
+pub mod ephemerides;
 pub mod helpers;
 pub mod pulsars;
-pub mod ephemerides;
 
 use app::Application;
 use log::{debug, error};
@@ -37,7 +32,7 @@ fn main() {
         Err(err) => {
             error!("{err}");
             return;
-        },
+        }
     };
 
     debug!("Running app");
@@ -45,9 +40,7 @@ fn main() {
     let result = eframe::run_native(
         "My egui App",
         options,
-        Box::new(|cc| {
-            Ok(Box::new(application.init(cc)))
-        }),
+        Box::new(|cc| Ok(Box::new(application.init(cc)))),
     );
 
     match result {

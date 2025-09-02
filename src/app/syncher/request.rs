@@ -1,11 +1,15 @@
-use arpa::{data_types::{par_meta::ParMeta, pulsar_meta::PulsarMeta}, ARPAError, Archivist};
+use arpa::{
+    ARPAError, Archivist,
+    data_types::{ParMeta, PulsarMeta},
+};
+use log::info;
 
 #[derive(Debug)]
 pub enum Message {
     Error(ARPAError),
     /// Sent out when an `Archivist` has been successfully created.
     Connected,
-    
+
     /// Response for attempting a commit.
     CommitSuccess,
     /// Response for attempting a rollback.
@@ -57,35 +61,35 @@ pub enum Request {
 }
 
 impl Request {
-    pub async fn handle(
-        self,
-        archvist: &mut Archivist
-    ) -> Message {
+    pub async fn handle(self, archvist: &mut Archivist) -> Message {
+        info!("Handling {:?}", self);
         use Message as M;
-        use Request as R;
         let response = match self {
-            R::Commit => archvist.commit_transaction().await
-                .map(|_| M::CommitSuccess),
-            R::Rollback => archvist.rollback_transaction().await
-                .map(|_| M::RollbackSuccess),
+            Self::Commit => archvist
+                .commit_transaction().await
+                .map(|()| M::CommitSuccess),
+            Self::Rollback => archvist
+                .rollback_transaction().await
+                .map(|()| M::RollbackSuccess),
 
             // ---- Pulsars ---------------------------------------------------
-            R::DownloadAllPulsars => archvist.get_all().await
+            Self::DownloadAllPulsars => archvist.get_all().await
                 .map(M::Pulsars),
-            R::DownloadPulsarById(id) => archvist.get(id).await
+            Self::DownloadPulsarById(id) => archvist.get(id).await
                 .map(M::SinglePulsar),
-            R::AddPulsar(meta) => archvist.insert(meta).await
+            Self::AddPulsar(meta) => archvist.insert(meta).await
                 .map(M::PulsarAdded),
-            R::DeletePulsar(id) => archvist.delete::<PulsarMeta>(id).await
-                .map(|_| M::PulsarDeleted(id)),
-            R::UpdatePulsar(id, meta) => 
-                archvist.update_from_cache::<PulsarMeta>(&meta, id).await
-                .map(|_| M::PulsarUpdated(id)),
+            Self::DeletePulsar(id) => archvist
+                .delete::<PulsarMeta>(id).await
+                .map(|()| M::PulsarDeleted(id)),
+            Self::UpdatePulsar(id, meta) => archvist
+                .update_from_cache::<PulsarMeta>(&meta, id).await
+                .map(|()| M::PulsarUpdated(id)),
 
             // ---- Ephemerides -----------------------------------------------
-            R::DownloadAllEphemerides => archvist.get_all().await
+            Self::DownloadAllEphemerides => archvist.get_all().await
                 .map(M::Ephemerides),
-            R::DownloadEphemerideById(id) => archvist.get(id).await
+            Self::DownloadEphemerideById(id) => archvist.get(id).await
                 .map(M::SingleEphemeride),
         };
 
