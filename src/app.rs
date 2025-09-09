@@ -1,13 +1,22 @@
 use arpa::ARPAError;
 use egui::{Align, FontId, Layout};
-use log::debug;
+use log::{debug, info, warn, error};
 
-use crate::ephemerides::EphemerideApp;
-use crate::pulsars::PulsarsApp;
-use crate::helpers::{confirm_button, icon, IconicButton, StatusMessage, StatusMessageSeverity};
+pub(crate) mod helpers;
+pub(crate) mod ephemerides;
+pub(crate) mod pulsars;
+mod pipeline;
+
+use ephemerides::EphemerideApp;
+use helpers::{
+    confirm_button, icon, IconicButton, StatusMessage, StatusMessageSeverity, ICON_CROSS, ICON_REVERT, ICON_SAVE
+};
+use pulsars::PulsarsApp;
 
 mod syncher;
-pub use syncher::{Syncher, Message, Request}; 
+pub(crate) use syncher::{Message, Request, Syncher, DataType};
+
+use crate::app::pipeline::PipelineApp;
 
 pub struct Application {
     archivist: Syncher,
@@ -22,6 +31,7 @@ pub struct Application {
     /// Applets
     pulsars: PulsarsApp,
     ephemerides: EphemerideApp,
+    pipeline: PipelineApp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -30,16 +40,18 @@ enum Tab {
     Ephemerides,
     Templates,
     Observatories,
+    Pipeline,
 }
-const TAB_FORMATS: &'static [(Tab, &'static str, &'static str)] = &[
+const TAB_FORMATS: &[(Tab, &str, &str)] = &[
     (Tab::Pulsars, "★", "Pulsars"),
     (Tab::Ephemerides, "⚙", "Ephemerides"),
     (Tab::Templates, "📄", "Templates"),
-    (Tab::Observatories, "🔭", "Observatories"),
+    (Tab::Observatories, "📡", "Observatories"),
+    (Tab::Pipeline, "🔩", "Pipeline"),
 ];
 
 impl Application {
-    pub fn new() -> Result<Self, ARPAError> {
+    pub(crate) fn new() -> Result<Self, ARPAError> {
         let archivist = Syncher::new()?;
 
         Ok(Self {
@@ -52,70 +64,74 @@ impl Application {
 
             pulsars: PulsarsApp::new(),
             ephemerides: EphemerideApp::new(),
+            pipeline: PipelineApp::new(),
         })
     }
 
-    pub fn init(self, cc: &eframe::CreationContext<'_>) -> Self {
+    pub(crate) fn init(self, cc: &eframe::CreationContext<'_>) -> Self {
         use egui::FontFamily as FF;
         use egui::TextStyle as TS;
         let text_styles: std::collections::BTreeMap<_, _> = [
-            (TS::Heading,   FontId::new(30.0, FF::Proportional)),
-            (TS::Small,     FontId::new(10.0, FF::Proportional)),
-            (TS::Body,      FontId::new(18.0, FF::Proportional)),
+            (TS::Heading, FontId::new(30.0, FF::Proportional)),
+            (TS::Small, FontId::new(10.0, FF::Proportional)),
+            (TS::Body, FontId::new(18.0, FF::Proportional)),
             (TS::Monospace, FontId::new(18.0, FF::Proportional)),
-            (TS::Button,    FontId::new(22.0, FF::Proportional)),
-        ].into();
+            (TS::Button, FontId::new(22.0, FF::Proportional)),
+        ]
+        .into();
 
         // Mutate global styles with new text styles
-        cc.egui_ctx.all_styles_mut(move |style| style.text_styles = text_styles.clone());
+        cc.egui_ctx.all_styles_mut(move |style| {
+            style.text_styles = text_styles.clone();
+        });
 
         self
     }
 
     fn menu_bar(&mut self, ctx: &egui::Context) {
-        egui::SidePanel::left("side-bar")
-        .show(ctx, |ui| ui.vertical_centered_justified(|ui| {
-            ui.set_width(80.0);
-            ui.add_space(24.0);
+        egui::SidePanel::left("side-bar").show(ctx, |ui| {
+            ui.vertical_centered_justified(|ui| {
+                ui.set_width(80.0);
+                ui.add_space(24.0);
 
-            TAB_FORMATS
-            .iter()
-            .for_each(|(t, i, h)| { 
-                ui.selectable_value(
-                    &mut self.tab, 
-                    *t, 
-                    icon(*i),
-                ).on_hover_text(*h);
-            });
+                for (t, i, h) in TAB_FORMATS {
+                    ui.selectable_value(&mut self.tab, *t, icon(i))
+                        .on_hover_text(*h);
+                };
 
-            ui.with_layout(
-                Layout::bottom_up(egui::Align::Center).with_cross_justify(true), 
-                |ui| {
-                    ui.add_space(24.0);
-                    self.sql_buttons(ui);
-                }
-            );
-        }));
+                ui.with_layout(
+                    Layout::bottom_up(egui::Align::Center)
+                        .with_cross_justify(true),
+                    |ui| {
+                        ui.add_space(24.0);
+                        self.sql_buttons(ui);
+                    },
+                );
+            })
+        });
     }
 
     fn sql_buttons(&self, ui: &mut egui::Ui) {
         // Rollback button
         let rollback_button = ui.add(
-            IconicButton::new("⮪")
-            .enabled(self.has_live_transaction)
-            .large()
-            .on_hover_text("Roll back current transaction.")
-            .on_disabled_hover_text("There is no transaction to roll back.")
+            IconicButton::new(ICON_REVERT)
+                .enabled(self.has_live_transaction)
+                .large()
+                .on_hover_text("Roll back current transaction.")
+                .on_disabled_hover_text(
+                    "There is no transaction to roll back.",
+                ),
         );
 
         // Save button
         let save = ui.add(
-            IconicButton::new("💾")
-            .enabled(self.has_live_transaction)
-            .on_hover_text("Commit current transaction.")
-            .on_disabled_hover_text("There is no transaction to commit.")
+            IconicButton::new(ICON_SAVE)
+                .enabled(self.has_live_transaction)
+                .large()
+                .on_hover_text("Commit current transaction.")
+                .on_disabled_hover_text("There is no transaction to commit."),
         );
-    
+
         if save.clicked() {
             self.archivist.request(Request::Commit);
         }
@@ -126,80 +142,117 @@ impl Application {
 
     fn message_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("messages")
-        .resizable(true)
-        .show(ctx, |ui| ui.with_layout(
-            Layout::right_to_left(Align::Center), 
-            |ui| {
-                let btn = ui.add(
-                    IconicButton::new("❌")
-                    .small()
-                    .enabled(!self.messages.is_empty())
-                    .on_hover_text("Clear all messages")
-                );
-
-                if btn.clicked() {
-                    self.messages.clear();
-                }
-                
-                ui.separator();
-
-                ui.with_layout(Layout::top_down_justified(Align::Min), |ui| { 
-                    egui::ScrollArea::vertical().show(ui, 
-                        |ui| for m in &self.messages { ui.add(m.widget()); }
+            .resizable(true)
+            .show(ctx, |ui| {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    let btn = ui.add(
+                        IconicButton::new(ICON_CROSS)
+                            .small()
+                            .enabled(!self.messages.is_empty())
+                            .on_hover_text("Clear all messages"),
                     );
-                });
-            }
-        )); 
+
+                    if btn.clicked() {
+                        self.messages.clear();
+                    }
+
+                    ui.separator();
+
+                    ui.with_layout(
+                        Layout::top_down_justified(Align::Min),
+                        |ui| {
+                            egui::ScrollArea::vertical().show(ui, |ui| {
+                                for m in &self.messages {
+                                    ui.add(m.widget());
+                                }
+                            });
+                        },
+                    );
+                })
+            });
     }
-    
+
     fn handle_message(&mut self, message: Message) {
         match message {
-            Message::Error(err) => self.handle_error(err),
-            Message::Connected => self.inform("Connected!"),
+            Message::Error(err) => {
+                        self.error(&err);
+                        self.pulsars.reset_ui();
+                        self.ephemerides.reset_ui();
+                    },
+            Message::Connected => self.info(&"Connected!"),
             Message::CommitSuccess => {
-                        self.inform("Commit successful! (list not updated)");
+                        self.info(&"Commit successful! (list not updated)");
 
                         self.has_live_transaction = false;
                     },
             Message::RollbackSuccess => {
-                        self.inform("Rollback successful!");
+                        self.info(&"Rollback successful!");
                         self.has_live_transaction = false;
                     },
-            Message::Pulsars(pulsars) => self.pulsars.set_pulsars(pulsars),
+            Message::ItemAdded(dt, id) => {
+                        self.info(&format!("Successfully added {dt} #{id}"));
+                        self.reset_part(dt);
+                        self.has_live_transaction = true;
+                    },
+            Message::ItemDeleted(dt, id) => {
+                        self.info(&format!("Successfully deleted {dt} #{id}"));
+                        self.reset_part(dt);
+                        self.has_live_transaction = true;
+                    },
+            Message::ItemUpdated(dt, id) => {
+                        self.info(&format!("Successfully updated {dt} #{id}"));
+                        self.has_live_transaction = true;
+                    },
+            Message::Pulsars(pulsars) => {
+                        if pulsars.is_empty() {
+                            self.warn(&"No pulsars to download!");
+                        }
+                        self.pulsars.set_pulsars(pulsars)
+                    },
             Message::SinglePulsar(pulsar) => self.pulsars.add_pulsar(pulsar),
-            Message::PulsarAdded(id) => {
-                        self.inform(format!("Successfully added pulsar #{:x}", id));
-                        self.pulsars.deselect();
-                        self.has_live_transaction = true;
+            Message::Ephemerides(pars) => {
+                        if pars.is_empty() {
+                            self.warn(&"No ephemerides to download!");
+                        }
+                        self.ephemerides.set_pars(pars);
                     },
-            Message::PulsarDeleted(id) => {
-                        self.inform(format!("Successfully deleted pulsar #{:x}", id));
-                        self.pulsars.deselect();
-                        self.has_live_transaction = true;
-                    },
-            Message::PulsarUpdated(id) => {
-                        self.inform(format!("Successfully updated pulsar #{:x}", id));
-                        self.has_live_transaction = true;
-                    },
-
-            Message::Ephemerides(pars) => self.ephemerides.set_pars(pars),
             Message::SingleEphemeride(par) => self.ephemerides.add_par(par),
+            Message::PipesSetUp(raw_meta, par_meta, template_meta) => 
+                self.pipeline.set_up(raw_meta, par_meta, template_meta),
+            Message::PipelineFinished => self.pipeline.finished(),
         }
     }
 
-    fn inform(&mut self, message: impl ToString) {
+    fn info(&mut self, message: &impl ToString) {
+        info!("{}", message.to_string());
         self.messages.push(StatusMessage {
             severity: StatusMessageSeverity::Info,
             message: message.to_string(),
-        })
+        });
     }
 
-    fn handle_error(&mut self, error: ARPAError) {
+    fn warn(&mut self, message: &impl ToString) {
+        warn!("{}", message.to_string());
+        self.messages.push(StatusMessage {
+            severity: StatusMessageSeverity::Warning,
+            message: message.to_string(),
+        });
+    }
+
+    fn error(&mut self, error: &ARPAError) {
+        error!("{}", error.to_string());
         self.messages.push(StatusMessage {
             severity: StatusMessageSeverity::Error,
-            message: format!("Error: {}", error),
+            message: format!("Error: {error}"),
         });
-        self.pulsars.reset_ui();
+        self.pipeline.interrupt();
+    }
+    
+    fn reset_part(&mut self, dt: DataType) {
+        match dt {
+            DataType::Pulsar => self.pulsars.deselect(),
+            DataType::Ephemeride => self.ephemerides.deselect(),
+        }
     }
 }
 
@@ -207,7 +260,7 @@ impl eframe::App for Application {
     fn update(&mut self, ctx: &egui::Context, _: &mut eframe::Frame) {
         // ---- Check inbox ---------------------------------------------------
         if let Some(message) = self.archivist.check_inbox() {
-            debug!("Incoming message: {:?}", message);
+            debug!("Incoming message: {message:?}");
             self.handle_message(message);
         }
 
@@ -218,17 +271,22 @@ impl eframe::App for Application {
         // ---- Display current applet ----------------------------------------
         match self.tab {
             Tab::Pulsars => self.pulsars.show(ctx, &self.archivist),
-            Tab::Ephemerides => self.ephemerides.show(ctx, &self.archivist),
+            Tab::Ephemerides => {
+                self.ephemerides.show(ctx, &self.archivist);
+                if let Some(id) = self.ephemerides.select_pulsar() {
+                    self.tab = Tab::Pulsars;
+                    self.pulsars.select_with_id(id);
+                }
+            },
+            Tab::Pipeline => self.pipeline.show(ctx, &self.archivist),
 
             _ => {
-                egui::CentralPanel::default().show(
-                    ctx, 
-                    |ui| ui.label("Nothing here yet!")
-                );
-            },
+                egui::CentralPanel::default()
+                    .show(ctx, |ui| ui.label("Nothing here yet!"));
+            }
         }
 
-        // Collect any and all messasges 
+        // Collect any and all messasges
         self.messages.append(self.pulsars.messages());
     }
 }
