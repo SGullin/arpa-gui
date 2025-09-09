@@ -2,8 +2,22 @@ use egui::{Align, Layout, RichText, Ui};
 use std::fmt::Display;
 
 pub mod downloader;
+mod iconic_button;
+
+pub use iconic_button::IconicButton;
 
 pub const MISSING_DATA: &str = "N/A";
+pub const ICON_CLEAR: &str = "🗋";
+pub const ICON_CROSS: &str = "❌";
+pub const ICON_INSERT: &str = "➕";
+pub const ICON_DELETE: &str = "🗑";
+pub const ICON_WRITE: &str = "📝";
+// pub const ICON_COPY: &str = "➕";
+pub const ICON_SAVE: &str = "💾";
+pub const ICON_OPEN: &str = "🗁";
+pub const ICON_REVERT: &str = "⮪";
+pub const ICON_SYNC: &str = "🔄";
+pub const ICON_RUN: &str = "🚂";
 
 pub struct StatusMessage {
     pub severity: StatusMessageSeverity,
@@ -23,6 +37,13 @@ impl StatusMessage {
                 StatusMessageSeverity::Error => egui::Color32::RED,
             },
         ))
+    }
+
+    pub fn wrong() -> Self {
+        Self {
+            severity: StatusMessageSeverity::Warning,
+            message: "Something went wrong.".into(),
+        }
     }
 }
 
@@ -88,6 +109,7 @@ pub fn enter_data_option(ui: &mut Ui, data: &mut Option<String>) -> bool {
     }
 }
 
+/// Adds a pop-up to confirm button press.
 pub fn confirm_button(button: egui::response::Response, caution: &str) -> bool {
     let mut confirmed = false;
     egui::Popup::menu(&button).show(|ui| {
@@ -107,18 +129,16 @@ pub fn confirm_button(button: egui::response::Response, caution: &str) -> bool {
     confirmed
 }
 
+/// For the main tabs.
 pub fn icon(text: &str) -> RichText {
     RichText::new(text).size(64.0)
 }
 
-pub fn small_icon(text: impl Into<String>) -> RichText {
-    RichText::new(text).size(28.0)
-}
-
+/// Adds a delete button aligned to the right.
 pub fn ra_delete(ui: &mut Ui, enabled: bool) -> bool {
     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
         let delete = ui.add(
-            IconicButton::new("🗑")
+            IconicButton::new(ICON_DELETE)
                 .enabled(enabled)
                 .on_hover_text("Delete"),
         );
@@ -126,82 +146,4 @@ pub fn ra_delete(ui: &mut Ui, enabled: bool) -> bool {
         confirm_button(delete, "Delete selected?")
     })
     .inner
-}
-
-pub struct IconicButton {
-    text: String,
-    size: usize,
-    hint: Option<String>,
-    disabled_hint: Option<String>,
-    enabled: Option<bool>,
-}
-
-impl IconicButton {
-    pub const HEIGHTS: [f32; 3] = [20.0, 40.0, 72.0];
-    pub const WIDTHS: [f32; 3] = [20.0, 60.0, 72.0];
-    pub const SIZES: [f32; 3] = [22.0, 28.0, 64.0];
-
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            size: 1,
-            hint: None,
-            disabled_hint: None,
-            enabled: None,
-        }
-    }
-
-    pub fn on_hover_text(mut self, text: impl Into<String>) -> Self {
-        self.hint = Some(text.into());
-        self
-    }
-
-    pub fn on_disabled_hover_text(mut self, text: impl Into<String>) -> Self {
-        self.disabled_hint = Some(text.into());
-        self
-    }
-
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = Some(enabled.into());
-        self
-    }
-
-    pub fn large(mut self) -> Self {
-        self.size = 2;
-        self
-    }
-
-    pub fn small(mut self) -> Self {
-        self.size = 0;
-        self
-    }
-}
-
-impl egui::Widget for IconicButton {
-    fn ui(self, ui: &mut Ui) -> egui::Response {
-        let call = |ui: &mut Ui| {
-            ui.add_sized(
-                [Self::WIDTHS[self.size], Self::HEIGHTS[self.size]],
-                egui::Button::new(
-                    RichText::new(self.text).size(Self::SIZES[self.size]),
-                ),
-            )
-        };
-
-        let mut response = match self.enabled {
-            Some(enabled) => ui.add_enabled_ui(enabled, call).inner,
-            None => call(ui),
-        };
-
-        if let Some(hint) = self.hint {
-            response =
-                response.on_hover_text(&hint).on_disabled_hover_text(hint)
-        }
-
-        if let Some(hint) = self.disabled_hint {
-            response = response.on_disabled_hover_text(hint)
-        }
-
-        response
-    }
 }

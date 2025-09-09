@@ -10,9 +10,6 @@
 extern crate argos_arpa as arpa;
 
 pub mod app;
-pub mod ephemerides;
-pub mod helpers;
-pub mod pulsars;
 
 use app::Application;
 use log::{debug, error};

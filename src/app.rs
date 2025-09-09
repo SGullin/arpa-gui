@@ -2,14 +2,21 @@ use arpa::ARPAError;
 use egui::{Align, FontId, Layout};
 use log::{debug, info, warn, error};
 
-use crate::ephemerides::EphemerideApp;
-use crate::helpers::{
-    IconicButton, StatusMessage, StatusMessageSeverity, confirm_button, icon,
+pub(crate) mod helpers;
+pub(crate) mod ephemerides;
+pub(crate) mod pulsars;
+mod pipeline;
+
+use ephemerides::EphemerideApp;
+use helpers::{
+    confirm_button, icon, IconicButton, StatusMessage, StatusMessageSeverity, ICON_CROSS, ICON_REVERT, ICON_SAVE
 };
-use crate::pulsars::PulsarsApp;
+use pulsars::PulsarsApp;
 
 mod syncher;
-pub use syncher::{Message, Request, Syncher};
+pub(crate) use syncher::{Message, Request, Syncher, DataType};
+
+use crate::app::pipeline::PipelineApp;
 
 pub struct Application {
     archivist: Syncher,
@@ -24,6 +31,7 @@ pub struct Application {
     /// Applets
     pulsars: PulsarsApp,
     ephemerides: EphemerideApp,
+    pipeline: PipelineApp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -32,12 +40,14 @@ enum Tab {
     Ephemerides,
     Templates,
     Observatories,
+    Pipeline,
 }
 const TAB_FORMATS: &[(Tab, &str, &str)] = &[
     (Tab::Pulsars, "★", "Pulsars"),
     (Tab::Ephemerides, "⚙", "Ephemerides"),
     (Tab::Templates, "📄", "Templates"),
-    (Tab::Observatories, "🔭", "Observatories"),
+    (Tab::Observatories, "📡", "Observatories"),
+    (Tab::Pipeline, "🔩", "Pipeline"),
 ];
 
 impl Application {
@@ -54,6 +64,7 @@ impl Application {
 
             pulsars: PulsarsApp::new(),
             ephemerides: EphemerideApp::new(),
+            pipeline: PipelineApp::new(),
         })
     }
 
@@ -103,7 +114,7 @@ impl Application {
     fn sql_buttons(&self, ui: &mut egui::Ui) {
         // Rollback button
         let rollback_button = ui.add(
-            IconicButton::new("⮪")
+            IconicButton::new(ICON_REVERT)
                 .enabled(self.has_live_transaction)
                 .large()
                 .on_hover_text("Roll back current transaction.")
@@ -114,7 +125,7 @@ impl Application {
 
         // Save button
         let save = ui.add(
-            IconicButton::new("💾")
+            IconicButton::new(ICON_SAVE)
                 .enabled(self.has_live_transaction)
                 .large()
                 .on_hover_text("Commit current transaction.")
@@ -135,7 +146,7 @@ impl Application {
             .show(ctx, |ui| {
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     let btn = ui.add(
-                        IconicButton::new("❌")
+                        IconicButton::new(ICON_CROSS)
                             .small()
                             .enabled(!self.messages.is_empty())
                             .on_hover_text("Clear all messages"),
@@ -163,46 +174,52 @@ impl Application {
 
     fn handle_message(&mut self, message: Message) {
         match message {
-            Message::Error(err) => self.error(&err),
+            Message::Error(err) => {
+                        self.error(&err);
+                        self.pulsars.reset_ui();
+                        self.ephemerides.reset_ui();
+                    },
             Message::Connected => self.info(&"Connected!"),
             Message::CommitSuccess => {
-                self.info(&"Commit successful! (list not updated)");
+                        self.info(&"Commit successful! (list not updated)");
 
-                self.has_live_transaction = false;
-            }
+                        self.has_live_transaction = false;
+                    },
             Message::RollbackSuccess => {
-                self.info(&"Rollback successful!");
-                self.has_live_transaction = false;
-            }
+                        self.info(&"Rollback successful!");
+                        self.has_live_transaction = false;
+                    },
+            Message::ItemAdded(dt, id) => {
+                        self.info(&format!("Successfully added {dt} #{id}"));
+                        self.reset_part(dt);
+                        self.has_live_transaction = true;
+                    },
+            Message::ItemDeleted(dt, id) => {
+                        self.info(&format!("Successfully deleted {dt} #{id}"));
+                        self.reset_part(dt);
+                        self.has_live_transaction = true;
+                    },
+            Message::ItemUpdated(dt, id) => {
+                        self.info(&format!("Successfully updated {dt} #{id}"));
+                        self.has_live_transaction = true;
+                    },
             Message::Pulsars(pulsars) => {
-                if pulsars.is_empty() {
-                    self.warn(&"No pulsars to download!");
-                }
-                self.pulsars.set_pulsars(pulsars)
-            },
+                        if pulsars.is_empty() {
+                            self.warn(&"No pulsars to download!");
+                        }
+                        self.pulsars.set_pulsars(pulsars)
+                    },
             Message::SinglePulsar(pulsar) => self.pulsars.add_pulsar(pulsar),
-            Message::PulsarAdded(id) => {
-                self.info(&format!("Successfully added pulsar #{id}"));
-                self.pulsars.deselect();
-                self.has_live_transaction = true;
-            }
-            Message::PulsarDeleted(id) => {
-                self.info(&format!("Successfully deleted pulsar #{id}"));
-                self.pulsars.deselect();
-                self.has_live_transaction = true;
-            }
-            Message::PulsarUpdated(id) => {
-                self.info(&format!("Successfully updated pulsar #{id}"));
-                self.has_live_transaction = true;
-            }
-
             Message::Ephemerides(pars) => {
-                if pars.is_empty() {
-                    self.warn(&"No ephemerides to download!");
-                }
-                self.ephemerides.set_pars(pars);
-            },
+                        if pars.is_empty() {
+                            self.warn(&"No ephemerides to download!");
+                        }
+                        self.ephemerides.set_pars(pars);
+                    },
             Message::SingleEphemeride(par) => self.ephemerides.add_par(par),
+            Message::PipesSetUp(raw_meta, par_meta, template_meta) => 
+                self.pipeline.set_up(raw_meta, par_meta, template_meta),
+            Message::PipelineFinished => self.pipeline.finished(),
         }
     }
 
@@ -228,6 +245,14 @@ impl Application {
             severity: StatusMessageSeverity::Error,
             message: format!("Error: {error}"),
         });
+        self.pipeline.interrupt();
+    }
+    
+    fn reset_part(&mut self, dt: DataType) {
+        match dt {
+            DataType::Pulsar => self.pulsars.deselect(),
+            DataType::Ephemeride => self.ephemerides.deselect(),
+        }
     }
 }
 
@@ -246,7 +271,14 @@ impl eframe::App for Application {
         // ---- Display current applet ----------------------------------------
         match self.tab {
             Tab::Pulsars => self.pulsars.show(ctx, &self.archivist),
-            Tab::Ephemerides => self.ephemerides.show(ctx, &self.archivist),
+            Tab::Ephemerides => {
+                self.ephemerides.show(ctx, &self.archivist);
+                if let Some(id) = self.ephemerides.select_pulsar() {
+                    self.tab = Tab::Pulsars;
+                    self.pulsars.select_with_id(id);
+                }
+            },
+            Tab::Pipeline => self.pipeline.show(ctx, &self.archivist),
 
             _ => {
                 egui::CentralPanel::default()

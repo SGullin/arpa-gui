@@ -3,11 +3,11 @@ use log::{debug, error};
 use tokio::task::JoinHandle;
 
 mod request;
-pub use request::{Message, Request};
+pub(crate) use request::{Message, Request, DataType};
 
 #[derive(Debug)]
 /// Keeps a tokio runtime with a loop running async commands.
-pub struct Syncher {
+pub(crate) struct Syncher {
     _runtime: tokio::runtime::Runtime,
     _handle: JoinHandle<()>,
     requester: tokio::sync::mpsc::UnboundedSender<Request>,
@@ -78,7 +78,7 @@ async fn core(
     }
 
     let mut archvist = match Archivist::new(
-        "config.toml",
+        "../test-data/config.toml",
         "../arpa/sql",
     ).await {
         Ok(a) => a,

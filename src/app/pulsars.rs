@@ -9,12 +9,14 @@ use egui_extras::{Column, TableBuilder};
 use rayon::slice::ParallelSliceMut;
 
 use crate::{
-    app::{Request, Syncher},
-    helpers::{
-        IconicButton, StatusMessage, StatusMessageSeverity, confirm_button,
-        downloader::{Downloader, DownloaderAction, FetchType},
-        enter_data_option, format_data_option, format_unique_data_option,
-        table_header,
+    app::{DataType, Request, Syncher,
+        helpers::{
+            confirm_button, 
+            downloader::{Downloader, DownloaderAction, FetchType}, 
+            enter_data_option, format_data_option, format_unique_data_option, table_header, 
+            IconicButton, StatusMessage, StatusMessageSeverity, 
+            ICON_CLEAR, ICON_INSERT, ICON_WRITE
+        },
     },
 };
 
@@ -31,7 +33,7 @@ const PULSAR_META_TABLE: [(&str, &str); 7] = [
     (".par id", "Master ephemeride file id"),
 ];
 
-pub struct PulsarsApp {
+pub(crate) struct PulsarsApp {
     messages: Vec<StatusMessage>,
     downloader: Downloader<PulsarMeta>,
 
@@ -60,10 +62,10 @@ impl PulsarsApp {
         match self.downloader.action() {
             DownloaderAction::None => {}
             DownloaderAction::Delete(index) => match index {
-                Some(id) => archivist.request(Request::DeletePulsar(id)),
+                Some(id) => archivist.request(Request::DeleteItem(DataType::Pulsar, id)),
                 None => {
                     self.messages.push(StatusMessage {
-                        severity: StatusMessageSeverity::Error,
+                        severity: StatusMessageSeverity::Warning,
                         message: "Something went wrong...".into(),
                     });
                 }
@@ -261,14 +263,16 @@ impl PulsarsApp {
         ui.vertical(|ui| {
             ui.add_space(6.0);
             let clear =
-                ui.add(IconicButton::new("🗋").on_hover_text("Clear fields"));
+                ui.add(IconicButton::new(ICON_CLEAR)
+                    .on_hover_text("Clear fields"));
 
             ui.add_space(2.0);
             let new =
-                ui.add(IconicButton::new("➕").on_hover_text("Insert new"));
+                ui.add(IconicButton::new(ICON_INSERT)
+                    .on_hover_text("Insert new"));
             ui.add_space(2.0);
             let overwrite = ui.add(
-                IconicButton::new("📝")
+                IconicButton::new(ICON_WRITE)
                     .enabled(self.downloader.selected().is_some())
                     .on_hover_text("Overwrite"),
             );
@@ -281,7 +285,7 @@ impl PulsarsApp {
                 if let Err(err) = self.new_pulsar.verify() {
                     self.messages.push(StatusMessage {
                         severity: StatusMessageSeverity::Error,
-                        message: format!("Cannot add pulsar! {}", err),
+                        message: format!("Cannot add pulsar! {err}"),
                     });
                     return;
                 }
@@ -294,7 +298,7 @@ impl PulsarsApp {
                 if let Err(err) = self.new_pulsar.verify() {
                     self.messages.push(StatusMessage {
                         severity: StatusMessageSeverity::Error,
-                        message: format!("Cannot overwrite pulsar! {}", err),
+                        message: format!("Cannot overwrite pulsar! {err}"),
                     });
                     return;
                 }
@@ -331,7 +335,7 @@ impl PulsarsApp {
             .map(|l| {
                 l.split_whitespace().map(str::to_string).collect::<Vec<_>>()
             })
-            .filter(|l| l.first().map(|w| !w.starts_with("#")).unwrap_or(false))
+            .filter(|l| l.first().map(|w| !w.starts_with('#')).unwrap_or(false))
             .map(|ws| {
                 PulsarMeta::from_strs(
                     &ws.iter().map(|w| w.as_str()).collect::<Vec<_>>(),
@@ -358,6 +362,16 @@ impl PulsarsApp {
             _ => return,
         };
         self.downloader.data_mut().par_sort_by(compare);
+    }
+    
+    pub(crate) fn select_with_id(&mut self, id: i32) {
+        let data = self.downloader.data();
+        for index in 0..data.len() {
+            if data[index].id == id {
+                self.downloader.select(index);
+                return;
+            }
+        }
     }
 }
 

@@ -1,6 +1,17 @@
 use arpa::TableItem;
 
+use super::ICON_SYNC;
+
 use super::{IconicButton, ra_delete};
+
+pub trait Item {
+    fn id(&self) -> i32;
+}
+impl<T> Item for T where T:TableItem {
+    fn id(&self) -> i32 {
+        self.id()
+    }
+}
 
 pub struct Downloader<T> {
     data: Vec<T>,
@@ -25,7 +36,7 @@ pub enum DownloaderAction {
 
 impl<T> Downloader<T>
 where
-    T: TableItem,
+    T: Item,
 {
     pub fn new() -> Self {
         Self {
@@ -65,7 +76,7 @@ where
                     .on_hover_text("Synching..."),
 
                 false => ui.add(
-                    IconicButton::new("🔄")
+                    IconicButton::new(ICON_SYNC)
                         .enabled(!self.fetching)
                         .on_hover_text("Download pulsars"),
                 ),
