@@ -26,7 +26,6 @@ pub(crate) enum Message {
     Error(ARPAError),
     /// Sent out when an `Archivist` has been successfully created.
     Connected,
-
     /// Response for attempting a commit.
     CommitSuccess,
     /// Response for attempting a rollback.
@@ -57,9 +56,10 @@ pub(crate) enum Message {
     PipesSetUp(RawMeta, Option<ParMeta>, TemplateMeta),
     /// Response if pipeline cooked properly.
     PipelineFinished,
+    /// Status message.
+    PipelineStatus(pipeline::Status),
 }
 
-#[derive(Debug)]
 pub(crate) enum Request {
     /// Commit a live transaction.
     Commit,
@@ -94,7 +94,62 @@ pub(crate) enum Request {
     /// Load files to set up pipeline job.
     SetupPipes { raw: String, ephemeride: String, template: String },
     /// Run the pipeline with the selected files.
-    RunPipeline { raw: RawMeta, ephemeride: Option<ParMeta>, template: TemplateMeta },
+    RunPipeline { 
+        raw: RawMeta, 
+        ephemeride: Option<ParMeta>, 
+        template: TemplateMeta,
+        callback: Box<dyn Fn(arpa::pipeline::Status)+Send+Sync>,
+    },
+}
+
+impl std::fmt::Debug for Request {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Commit => write!(f, "Commit"),
+            Self::Rollback => write!(f, "Rollback"),
+            Self::DeleteItem(t, i) => 
+                f.debug_tuple("DeleteItem").field(t).field(i).finish(),
+
+            Self::DownloadAllPulsars => write!(f, "DownloadAllPulsars"),
+            Self::DownloadPulsarById(i) => 
+                f.debug_tuple("DownloadPulsarById").field(i).finish(),
+            Self::AddPulsar(pm) => 
+                f.debug_tuple("AddPulsar").field(pm).finish(),
+            Self::UpdatePulsar(i, pm) => 
+                f.debug_tuple("UpdatePulsar").field(i).field(pm).finish(),
+
+            Self::DownloadAllEphemerides => 
+                write!(f, "DownloadAllEphemerides"),
+            Self::DownloadEphemerideById(i) => 
+                f.debug_tuple("DownloadEphemerideById").field(i).finish(),
+            Self::AddPar { path, pulsar, master } => 
+                f.debug_struct("AddPar")
+                .field("path", path)
+                .field("pulsar", pulsar)
+                .field("master", master)
+                .finish(),
+            Self::UpdatePar { id, path, pulsar, master } => 
+                f.debug_struct("UpdatePar")
+                .field("id", id)
+                .field("path", path)
+                .field("pulsar", pulsar)
+                .field("master", master)
+                .finish(),
+            
+            Self::SetupPipes { raw, ephemeride, template } => 
+                f.debug_struct("SetupPipes")
+                .field("raw", raw)
+                .field("ephemeride", ephemeride)
+                .field("template", template)
+                .finish(),
+            Self::RunPipeline { raw, ephemeride, template, .. } => 
+                f.debug_struct("RunPipeline")
+                .field("raw", raw)
+                .field("ephemeride", ephemeride)
+                .field("template", template)
+                .finish_non_exhaustive(),
+        }
+    }
 }
 
 impl Request {
@@ -156,13 +211,14 @@ impl Request {
             Self::SetupPipes { raw, ephemeride, template } => 
                 set_up_pipes(archivist, raw, ephemeride, template).await
                 .map(|(r, p, t)| M::PipesSetUp(r, p, t)),
-            Self::RunPipeline { raw, ephemeride, template } =>
+            Self::RunPipeline { raw, ephemeride, template, callback } =>
                 pipeline::cook(
                     archivist, 
                     raw, 
                     ephemeride, 
                     template, 
                     true,
+                    callback,
                 ).await
                 .map(|()| M::PipelineFinished)
         };

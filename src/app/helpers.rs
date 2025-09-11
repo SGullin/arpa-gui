@@ -10,6 +10,7 @@ pub const MISSING_DATA: &str = "N/A";
 pub const ICON_CLEAR: &str = "🗋";
 pub const ICON_CROSS: &str = "❌";
 pub const ICON_INSERT: &str = "➕";
+pub const ICON_CHECK : &str = "✔";
 pub const ICON_DELETE: &str = "🗑";
 pub const ICON_WRITE: &str = "📝";
 // pub const ICON_COPY: &str = "➕";

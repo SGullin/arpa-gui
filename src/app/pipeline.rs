@@ -1,9 +1,33 @@
 use std::mem::replace;
 
-use arpa::data_types::{ParMeta, RawMeta, TemplateMeta};
+use arpa::{conveniences::display_elapsed_time, data_types::{ParMeta, RawMeta, TemplateMeta}, pipeline::Status};
 use egui::{Context, RichText};
 
-use crate::app::{helpers::{IconicButton, StatusMessage, ICON_CLEAR, ICON_RUN, ICON_WRITE, MISSING_DATA}, Request, Syncher};
+use crate::app::{helpers::{IconicButton, ICON_CHECK, ICON_CLEAR, ICON_CROSS, ICON_RUN, ICON_WRITE, MISSING_DATA}, Request, Syncher};
+
+#[derive(Debug, Default)]
+struct RunInfo {
+    status: Status,
+    errored: bool,
+    generated_toas: Option<usize>,
+    archived_toas: Option<usize>,
+    diagnosed: (usize, Vec<(String, bool)>),
+    archived_plots: Option<Option<usize>>,
+    done: Option<std::time::Duration>,
+} 
+
+const MESSAGES: &[&str] = &[
+    "Preparing",
+    "Copying file",
+    "Installing ephemeride",
+    "Manipulating",
+    "Verifying template",
+    "Generating TOAs",
+    "Logging process",
+    "Parsing TOA info",
+    "Running diagnostics",
+    "Finished!",
+];
 
 #[derive(Debug)]
 enum PipeStage {
@@ -23,7 +47,8 @@ enum PipeStage {
         ephemeride: Option<ParMeta>,
         template: TemplateMeta,
     },
-    Running,
+    
+    Running(RunInfo),
 }
 
 impl Default for PipeStage {
@@ -38,7 +63,6 @@ impl Default for PipeStage {
 
 pub struct PipelineApp {
     state: PipeStage,
-    messages: Vec<StatusMessage>,
 }
 
 impl PipelineApp {
@@ -49,7 +73,6 @@ impl PipelineApp {
                 ephemeride: String::new(), 
                 template: String::new(),
             },
-            messages: Vec::new(),
         }
     }
     
@@ -87,9 +110,9 @@ impl PipelineApp {
                 self.running_buttons(archivist, ui, raw, ephemeride, template);
             },
 
-            PipeStage::Running => {
-                Self::running(ui);
-                self.state = PipeStage::Running;
+            PipeStage::Running(info) => {
+                self.running(ui, &info);
+                self.state = PipeStage::Running(info);
             },
         });
     }
@@ -119,7 +142,11 @@ impl PipelineApp {
         .spacing([32.0, 4.0])
         .striped(true)
         .show(ui, |ui| {
-            ui.label("Raw file path or id");
+            ui.label("");
+            ui.label("Path or ID");
+            ui.end_row();
+
+            ui.label("Raw file");
             if active {
                 ui.text_edit_singleline(raw);
             } 
@@ -128,7 +155,7 @@ impl PipelineApp {
             }
             ui.end_row();
 
-            ui.label("Ephemeride path or id");
+            ui.label("Ephemeride");
             if active {
                 ui.text_edit_singleline(ephemeride);
             } 
@@ -137,7 +164,7 @@ impl PipelineApp {
             }
             ui.end_row();
 
-            ui.label("Template path or id");
+            ui.label("Template");
             if active {
                 ui.text_edit_singleline(template);
             } 
@@ -290,13 +317,16 @@ impl PipelineApp {
                 };
             }
             else if run.clicked() {
-                archivist.request(Request::RunPipeline {
+                // archivist.request(Request::RunPipeline {
+                //     raw,
+                //     ephemeride,
+                //     template,
+                // });
+                archivist.run_pipeline(
                     raw,
                     ephemeride,
                     template,
-                });
-
-                self.state = PipeStage::Running;
+                );
             }
             else {
                 self.state = PipeStage::SetUp { raw, ephemeride, template };
@@ -305,24 +335,135 @@ impl PipelineApp {
 
     }
     
-    fn running(ui: &mut egui::Ui) {
-        ui.label("Running pipeline...");
-        ui.spinner();
-    }
-    
-    pub(crate) fn finished(&mut self) {
-        self.messages.push(StatusMessage {
-            severity: crate::app::helpers::StatusMessageSeverity::Info,
-            message: "Pipeline finished!".into(),
+    fn running(&mut self, ui: &mut egui::Ui, info: &RunInfo) {
+        ui.label(RichText::new("Running pipeline...").strong());
+        let msg_index = match &info.status {
+            Status::Idle |
+            Status::Error(_) |
+            Status::Starting { .. } => 0,
+            Status::Copying(_, _) => 1,
+            Status::InstallingEphemeride => 2,
+            Status::Manipulating => 3,
+            Status::VerifyingTemplate => 4,
+            Status::GeneratingTOAs |
+            Status::GotTOAs(_) => 5,
+            Status::LoggingProcess => 6,
+            Status::ParsingTOAs |
+            Status::ArchivedTOAs(_) => 7,
+            Status::Diagnosing(_) |
+            Status::FinishedDiagnostic { .. } |
+            Status::ArchivedTOAPlots(_) => 8,
+            Status::Finished(_) => 9,
+        };
+
+        for i in 0..msg_index {
+            ui.horizontal(|ui| {
+                ui.label(MESSAGES[i]);
+                match i {
+                    5 => if let Some(n) = info.generated_toas {
+                        ui.label(format!("➡ Got {n} TOA(s)!"));
+                    },
+                    7 => if let Some(n) = info.archived_toas {
+                        ui.label(format!("➡ Archived {n} TOA(s)!"));
+                    },
+                    8 => {
+                        ui.label(format!(
+                            "{} / {}", 
+                            info.diagnosed.0,
+                            info.diagnosed.1.len(),
+                        ));
+                    },
+                    _ => { ui.label(ICON_CHECK); }
+                }
+            });
+
+            if i == 8 {
+                for (diag, ok) in &info.diagnosed.1 {
+                    ui.label(format!(
+                        "\t{} {}",
+                        diag,
+                        if *ok { ICON_CHECK } else { ICON_CROSS },
+                    ));
+                }
+                if let Some(ok) = info.archived_plots {
+                    if let Some(n) = ok {
+                        ui.label(format!("\tArchived {n} psrchive plots!"));
+                    }
+                    else {
+                        ui.label(format!(
+                            "\tFailed to archive psrchive plots!"
+                        ));
+                    }
+                }
+            }
+        }
+        ui.horizontal(|ui| {
+            ui.label(RichText::new(MESSAGES[msg_index]).strong());
+        
+            if info.errored {
+                ui.label(ICON_CROSS);
+            }
+            else if let Some(duration) = &info.done {
+                ui.label(format!(
+                    "Time elapsed {}", 
+                    display_elapsed_time(*duration),
+                ));
+            }
+            else {
+                ui.spinner();
+            }
         });
-        self.state = PipeStage::default();
+
+        if msg_index == 9 || info.errored {
+            if ui.button("Start over").clicked() {
+                log::info!("Redoing!");
+                self.state = PipeStage::default();
+            }
+        }
     }
 
     pub(crate) fn interrupt(&mut self) {
         self.state = match replace(&mut self.state, PipeStage::Invalid) {
-            PipeStage::Running |
+            PipeStage::Running(_) |
             PipeStage::Invalid => PipeStage::default(),
             s => s,
         }
+    }
+    
+    pub(crate) fn set_status(&mut self, status: Status) {
+        let mut info = match std::mem::replace(
+            &mut self.state, 
+            PipeStage::Invalid
+        ) {
+            PipeStage::Running(info) => info,
+            _ => RunInfo::default()
+        };
+
+        match &status {
+            Status::Error(_) => info.errored = true,
+
+            Status::GotTOAs(n) => info.generated_toas = Some(*n),
+            Status::ArchivedTOAs(n) => info.archived_toas = Some(*n),
+            Status::Diagnosing(n) => info.diagnosed = (*n, Vec::new()),
+            Status::FinishedDiagnostic { diagnostic, passed } => 
+                info.diagnosed.1.push((
+                    diagnostic.clone(), 
+                    *passed
+                )),
+            Status::ArchivedTOAPlots(n) => info.archived_plots = Some(*n),
+            Status::Finished(duration) => info.done = Some(*duration),
+            
+            _ => {},
+        }
+
+        if let Status::Error(_) = status {} else {
+            info.status = status;
+        }
+
+        self.state = PipeStage::Running(info);
+    }
+    
+    pub(crate) fn reset(&mut self) {
+        self.state = PipeStage::default();
     }
 }
