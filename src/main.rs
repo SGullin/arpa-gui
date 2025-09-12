@@ -41,7 +41,7 @@ fn main() {
     );
 
     match result {
-        Ok(_) => println!("Application closed gracefully."),
-        Err(err) => println!("Runtime error: {}", err),
+        Ok(()) => println!("Application closed gracefully."),
+        Err(err) => println!("Runtime error: {err}"),
     }
 }

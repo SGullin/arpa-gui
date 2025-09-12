@@ -1,13 +1,17 @@
-use arpa::{data_types::{ParMeta, RawMeta, TemplateMeta}, pipeline::Status, ARPAError, Archivist};
+use arpa::{
+    ARPAError, Archivist,
+    data_types::{ParMeta, RawMeta, TemplateMeta},
+    pipeline::Status,
+};
 use log::{debug, error};
 use tokio::task::JoinHandle;
 
 mod request;
-pub(crate) use request::{Message, Request, DataType};
+pub use request::{DataType, Message, Request};
 
 #[derive(Debug)]
 /// Keeps a tokio runtime with a loop running async commands.
-pub(crate) struct Syncher {
+pub struct Syncher {
     _runtime: tokio::runtime::Runtime,
     _handle: JoinHandle<()>,
     requester: tokio::sync::mpsc::UnboundedSender<Request>,
@@ -61,7 +65,7 @@ impl Syncher {
             error!("Could not send {:?}", err.0);
         }
     }
-    
+
     pub(crate) fn run_pipeline(
         &self,
         raw: RawMeta,
@@ -70,16 +74,16 @@ impl Syncher {
     ) {
         let sender = self.message_sender.clone();
         let callback = Box::new(move |s: Status| {
-            let result = sender.send(Message::PipelineStatus(s)); 
+            let result = sender.send(Message::PipelineStatus(s));
             if let Err(err) = result {
                 error!("Send error: {err}");
             }
         });
 
-        self.request(Request::RunPipeline { 
-            raw, 
-            ephemeride, 
-            template, 
+        self.request(Request::RunPipeline {
+            raw,
+            ephemeride,
+            template,
             callback,
         });
     }
@@ -89,7 +93,7 @@ async fn core(
     sender: std::sync::mpsc::Sender<Message>,
     mut receiver: tokio::sync::mpsc::UnboundedReceiver<Request>,
 ) {
-    async fn send(
+    fn send(
         message: Message,
         channel: &std::sync::mpsc::Sender<Message>,
     ) -> bool {
@@ -101,19 +105,17 @@ async fn core(
         true
     }
 
-    let mut archvist = match Archivist::new(
-        "../test-data/config.toml",
-        "../arpa/sql",
-    ).await {
-        Ok(a) => a,
-        Err(err) => {
-            send(Message::Error(err), &sender).await;
-            return;
-        }
-    };
+    let mut archvist =
+        match Archivist::new("../test-data/config.toml", "../arpa/sql").await {
+            Ok(a) => a,
+            Err(err) => {
+                send(Message::Error(err), &sender);
+                return;
+            }
+        };
 
     // Tell user we're in
-    if !send(Message::Connected, &sender).await {
+    if !send(Message::Connected, &sender) {
         return;
     };
 
@@ -126,11 +128,17 @@ async fn core(
         let response = request.handle(&mut archvist).await;
 
         match response {
-            Message::Error(err) => 
-                if !send(Message::Error(err), &sender).await { return; },
+            Message::Error(err) => {
+                if !send(Message::Error(err), &sender) {
+                    return;
+                }
+            }
 
-            msg => 
-                if !send(msg, &sender).await { return; },
+            msg => {
+                if !send(msg, &sender) {
+                    return;
+                }
+            }
         }
     }
 }
