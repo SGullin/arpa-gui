@@ -1,4 +1,4 @@
-use arpa::ARPAError;
+use arpa::{pipeline::Status, ARPAError};
 use egui::{Align, FontId, Layout};
 use log::{debug, info, warn, error};
 
@@ -175,51 +175,58 @@ impl Application {
     fn handle_message(&mut self, message: Message) {
         match message {
             Message::Error(err) => {
-                        self.error(&err);
-                        self.pulsars.reset_ui();
-                        self.ephemerides.reset_ui();
-                    },
+                self.error(&err);
+                self.pulsars.reset_ui();
+                self.ephemerides.reset_ui();
+                self.pipeline.reset();
+            },
             Message::Connected => self.info(&"Connected!"),
             Message::CommitSuccess => {
-                        self.info(&"Commit successful! (list not updated)");
+                self.info(&"Commit successful! (list not updated)");
 
-                        self.has_live_transaction = false;
-                    },
+                self.has_live_transaction = false;
+            },
             Message::RollbackSuccess => {
-                        self.info(&"Rollback successful!");
-                        self.has_live_transaction = false;
-                    },
+                self.info(&"Rollback successful!");
+                self.has_live_transaction = false;
+            },
             Message::ItemAdded(dt, id) => {
-                        self.info(&format!("Successfully added {dt} #{id}"));
-                        self.reset_part(dt);
-                        self.has_live_transaction = true;
-                    },
+                self.info(&format!("Successfully added {dt} #{id}"));
+                self.reset_part(dt);
+                self.has_live_transaction = true;
+            },
             Message::ItemDeleted(dt, id) => {
-                        self.info(&format!("Successfully deleted {dt} #{id}"));
-                        self.reset_part(dt);
-                        self.has_live_transaction = true;
-                    },
+                self.info(&format!("Successfully deleted {dt} #{id}"));
+                self.reset_part(dt);
+                self.has_live_transaction = true;
+            },
             Message::ItemUpdated(dt, id) => {
-                        self.info(&format!("Successfully updated {dt} #{id}"));
-                        self.has_live_transaction = true;
-                    },
+                self.info(&format!("Successfully updated {dt} #{id}"));
+                self.has_live_transaction = true;
+            },
             Message::Pulsars(pulsars) => {
-                        if pulsars.is_empty() {
-                            self.warn(&"No pulsars to download!");
-                        }
-                        self.pulsars.set_pulsars(pulsars)
-                    },
+                if pulsars.is_empty() {
+                    self.warn(&"No pulsars to download!");
+                }
+                self.pulsars.set_pulsars(pulsars)
+            },
             Message::SinglePulsar(pulsar) => self.pulsars.add_pulsar(pulsar),
             Message::Ephemerides(pars) => {
-                        if pars.is_empty() {
-                            self.warn(&"No ephemerides to download!");
-                        }
-                        self.ephemerides.set_pars(pars);
-                    },
+                if pars.is_empty() {
+                    self.warn(&"No ephemerides to download!");
+                }
+                self.ephemerides.set_pars(pars);
+            },
             Message::SingleEphemeride(par) => self.ephemerides.add_par(par),
             Message::PipesSetUp(raw_meta, par_meta, template_meta) => 
                 self.pipeline.set_up(raw_meta, par_meta, template_meta),
-            Message::PipelineFinished => self.pipeline.finished(),
+            Message::PipelineStatus(s) => {
+                if let Status::Error(err) = &s {
+                    self.error(err);
+                }
+                self.pipeline.set_status(s);
+            },
+            Message::PipelineFinished => self.info(&"Pipeline finished!"),
         }
     }
 
@@ -239,11 +246,11 @@ impl Application {
         });
     }
 
-    fn error(&mut self, error: &ARPAError) {
+    fn error(&mut self, error: &impl ToString) {
         error!("{}", error.to_string());
         self.messages.push(StatusMessage {
             severity: StatusMessageSeverity::Error,
-            message: format!("Error: {error}"),
+            message: format!("Error: {}", error.to_string()),
         });
         self.pipeline.interrupt();
     }
