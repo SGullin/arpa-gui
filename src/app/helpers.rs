@@ -13,9 +13,9 @@ pub const ICON_INSERT: &str = "➕";
 pub const ICON_CHECK : &str = "✔";
 pub const ICON_DELETE: &str = "🗑";
 pub const ICON_WRITE: &str = "📝";
-// pub const ICON_COPY: &str = "➕";
 pub const ICON_SAVE: &str = "💾";
 pub const ICON_OPEN: &str = "🗁";
+pub const ICON_ARROW: &str = "⤵";
 pub const ICON_REVERT: &str = "⮪";
 pub const ICON_SYNC: &str = "🔄";
 pub const ICON_RUN: &str = "🚂";
@@ -132,7 +132,7 @@ pub fn confirm_button(button: egui::response::Response, caution: &str) -> bool {
 
 /// For the main tabs.
 pub fn icon(text: &str) -> RichText {
-    RichText::new(text).size(64.0)
+    RichText::new(text).size(52.0)
 }
 
 /// Adds a delete button aligned to the right.

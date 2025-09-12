@@ -37,7 +37,7 @@ impl super::helpers::downloader::Item for ParData {
 
 pub(crate) struct EphemerideApp {
     messages: Vec<StatusMessage>,
-    downloader: Downloader<ParData>,
+    pub downloader: Downloader<ParData>,
 
     sort_by: usize,
     new_par: Option<PathBuf>,
@@ -63,12 +63,14 @@ impl EphemerideApp {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, archivist: &Syncher) {
-        self.downloader.show(ctx);
+        self.downloader.action_bar(ctx);
 
         match self.downloader.action() {
             DownloaderAction::None => {}
             DownloaderAction::Delete(index) => match index {
-                Some(id) => archivist.request(Request::DeleteItem(DataType::Ephemeride, id)),
+                Some(id) => archivist.request(
+                    Request::DeleteItem(DataType::TOA, id)
+                ),
                 None => self.messages.push(StatusMessage {
                     severity: StatusMessageSeverity::Warning,
                     message: "Something went wrong...".into(),
@@ -277,16 +279,6 @@ impl EphemerideApp {
         });
     }
 
-    pub fn set_pars(&mut self, pars: Vec<ParData>) {
-        *self.downloader.data_mut() = pars;
-        self.reset_ui();
-    }
-
-    pub fn add_par(&mut self, par: ParData) {
-        self.downloader.data_mut().push(par);
-        self.reset_ui();
-    }
-
     pub fn reset_ui(&mut self) {
         self.downloader.stop_fetching();
     }
@@ -310,6 +302,10 @@ impl EphemerideApp {
     
     pub(crate) fn select_pulsar(&mut self) -> Option<i32> {
         self.move_to_pulsar_id.take()
+    }
+    
+    pub(crate) fn selected(&self) -> Option<i32> {
+        self.downloader.selected_id()
     }
 }
 

@@ -3,8 +3,9 @@ use egui::{Align, FontId, Layout};
 use log::{debug, info, warn, error};
 
 pub(crate) mod helpers;
-pub(crate) mod ephemerides;
 pub(crate) mod pulsars;
+pub(crate) mod ephemerides;
+mod toas;
 mod pipeline;
 
 use ephemerides::EphemerideApp;
@@ -12,12 +13,30 @@ use helpers::{
     confirm_button, icon, IconicButton, StatusMessage, StatusMessageSeverity, ICON_CROSS, ICON_REVERT, ICON_SAVE
 };
 use pulsars::PulsarsApp;
+use toas::TOAsApp;
 
 mod syncher;
 pub(crate) use syncher::{Message, Request, Syncher, DataType};
 
 use crate::app::pipeline::PipelineApp;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Tab {
+    Pulsars,
+    Ephemerides,
+    Templates,
+    Observatories,
+    TOAs,
+    Pipeline,
+}
+const TAB_FORMATS: &[(Tab, &str, &str)] = &[
+    (Tab::Pulsars, "💫", "Pulsars"),
+    (Tab::Ephemerides, "⚙", "Ephemerides"),
+    (Tab::Templates, "📄", "Templates"),
+    (Tab::Observatories, "📡", "Observatories"),
+    (Tab::TOAs, "📆", "TOAs"),
+    (Tab::Pipeline, "🔩", "Pipeline"),
+];
 pub struct Application {
     archivist: Syncher,
 
@@ -31,24 +50,9 @@ pub struct Application {
     /// Applets
     pulsars: PulsarsApp,
     ephemerides: EphemerideApp,
+    toas: TOAsApp,
     pipeline: PipelineApp,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Tab {
-    Pulsars,
-    Ephemerides,
-    Templates,
-    Observatories,
-    Pipeline,
-}
-const TAB_FORMATS: &[(Tab, &str, &str)] = &[
-    (Tab::Pulsars, "★", "Pulsars"),
-    (Tab::Ephemerides, "⚙", "Ephemerides"),
-    (Tab::Templates, "📄", "Templates"),
-    (Tab::Observatories, "📡", "Observatories"),
-    (Tab::Pipeline, "🔩", "Pipeline"),
-];
 
 impl Application {
     pub(crate) fn new() -> Result<Self, ARPAError> {
@@ -64,6 +68,7 @@ impl Application {
 
             pulsars: PulsarsApp::new(),
             ephemerides: EphemerideApp::new(),
+            toas: TOAsApp::new(),
             pipeline: PipelineApp::new(),
         })
     }
@@ -208,16 +213,21 @@ impl Application {
                 if pulsars.is_empty() {
                     self.warn(&"No pulsars to download!");
                 }
-                self.pulsars.set_pulsars(pulsars)
+                self.pulsars.downloader.set(pulsars)
             },
-            Message::SinglePulsar(pulsar) => self.pulsars.add_pulsar(pulsar),
+            Message::SinglePulsar(pulsar) => self.pulsars.downloader.add(pulsar),
+
             Message::Ephemerides(pars) => {
                 if pars.is_empty() {
                     self.warn(&"No ephemerides to download!");
                 }
-                self.ephemerides.set_pars(pars);
+                self.ephemerides.downloader.set(pars);
             },
-            Message::SingleEphemeride(par) => self.ephemerides.add_par(par),
+            Message::SingleEphemeride(par) => self.ephemerides.downloader.add(par),
+
+            Message::TOAs(toas) => self.toas.downloader.set(toas),
+            Message::SingleTOA(toa) => self.toas.downloader.add(toa),
+
             Message::PipesSetUp(raw_meta, par_meta, template_meta) => 
                 self.pipeline.set_up(raw_meta, par_meta, template_meta),
             Message::PipelineStatus(s) => {
@@ -259,6 +269,7 @@ impl Application {
         match dt {
             DataType::Pulsar => self.pulsars.deselect(),
             DataType::Ephemeride => self.ephemerides.deselect(),
+            DataType::TOA => self.toas.deselect(),
         }
     }
 }
@@ -285,7 +296,14 @@ impl eframe::App for Application {
                     self.pulsars.select_with_id(id);
                 }
             },
-            Tab::Pipeline => self.pipeline.show(ctx, &self.archivist),
+
+            Tab::TOAs => self.toas.show(ctx, &self.archivist),
+            
+            Tab::Pipeline => self.pipeline.show(
+                ctx, 
+                &self.archivist,
+                &self.ephemerides,
+            ),
 
             _ => {
                 egui::CentralPanel::default()

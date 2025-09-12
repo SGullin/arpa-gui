@@ -13,15 +13,7 @@ impl<T> Item for T where T:TableItem {
     }
 }
 
-pub struct Downloader<T> {
-    data: Vec<T>,
-    selected: Option<usize>,
-    fetch_type: FetchType,
-    fetching: bool,
-    action: DownloaderAction,
-}
-
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum FetchType {
     All,
     Id(i32),
@@ -34,11 +26,17 @@ pub enum DownloaderAction {
     Download(FetchType),
 }
 
-impl<T> Downloader<T>
-where
-    T: Item,
-{
-    pub fn new() -> Self {
+pub struct Downloader<T> {
+    data: Vec<T>,
+    selected: Option<usize>,
+    fetch_type: FetchType,
+    fetching: bool,
+    action: DownloaderAction,
+}
+
+impl<T> Downloader<T> 
+where T: Item {
+    pub const fn new() -> Self {
         Self {
             data: Vec::new(),
             selected: None,
@@ -48,7 +46,7 @@ where
         }
     }
 
-    pub fn show(&mut self, ctx: &egui::Context) {
+    pub fn action_bar(&mut self, ctx: &egui::Context) {
         egui::TopBottomPanel::bottom("downloader").show(ctx, |ui| {
             ui.add_space(12.0);
             ui.horizontal(|ui| {
@@ -67,19 +65,18 @@ where
         ui.horizontal(|ui| {
             ui.set_height(IconicButton::HEIGHTS[1]);
 
-            let download = match self.fetching {
-                true => ui
-                    .add_sized(
-                        [IconicButton::WIDTHS[1], IconicButton::HEIGHTS[1]],
-                        egui::Spinner::new(),
-                    )
-                    .on_hover_text("Synching..."),
-
-                false => ui.add(
-                    IconicButton::new(ICON_SYNC)
-                        .enabled(!self.fetching)
-                        .on_hover_text("Download pulsars"),
-                ),
+            let download = if self.fetching {
+                ui.add_sized(
+                    [IconicButton::WIDTHS[1], IconicButton::HEIGHTS[1]],
+                    egui::Spinner::new(),
+                )
+                .on_hover_text("Synching...")
+            } 
+            else {
+                ui.add(IconicButton::new(ICON_SYNC)
+                    .enabled(!self.fetching)
+                    .on_hover_text("Download pulsars"),
+                )
             };
 
             ui.radio_value(&mut self.fetch_type, FetchType::All, "All");
@@ -114,6 +111,12 @@ where
         }
 
         self.select(pos.unwrap_or(self.data.len() - 1));
+        self.fetching = false;
+    }
+
+    pub fn set(&mut self, items: Vec<T>) {
+        self.data = items;
+        self.fetching = false;
     }
 
     pub fn action(&mut self) -> DownloaderAction {

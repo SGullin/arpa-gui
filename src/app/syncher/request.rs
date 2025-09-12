@@ -1,22 +1,24 @@
 use std::path::PathBuf;
 
 use arpa::{
-    data_types::{ParMeta, PulsarMeta, RawMeta, TemplateMeta}, pipeline, ARPAError, Archivist
+    data_types::{ParMeta, PulsarMeta, RawMeta, TOAInfo, TemplateMeta}, pipeline, ARPAError, Archivist
 };
 use log::info;
 
-use crate::app::ephemerides::ParData;
+use crate::app::{ephemerides::ParData, helpers::downloader::FetchType};
 
 #[derive(Debug)]
 pub(crate) enum DataType {
     Pulsar,
     Ephemeride,
+    TOA,
 }
 impl std::fmt::Display for DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             DataType::Pulsar => write!(f, "pulsar"),
             DataType::Ephemeride => write!(f, "ephemeride"),
+            DataType::TOA => write!(f, "TOA"),
         }
     }
 }
@@ -50,6 +52,12 @@ pub(crate) enum Message {
     Ephemerides(Vec<ParData>),
     /// Downloaded par info.
     SingleEphemeride(ParData),
+
+    // ---- TOAs --------------------------------------------------------------
+    /// Downloaded TOAs.
+    TOAs(Vec<TOAInfo>),
+    /// Downloaded TOA.
+    SingleTOA(TOAInfo),
     
     // ---- Pipeline ----------------------------------------------------------
     /// Response if set up is ok.
@@ -89,6 +97,10 @@ pub(crate) enum Request {
     AddPar { path: PathBuf, pulsar: String, master: bool },
     /// Overwrite an existing ephemeride.
     UpdatePar { id: i32, path: PathBuf, pulsar: String, master: bool },
+
+    // ---- TOAs --------------------------------------------------------------
+    /// Download some TOAs.
+    DownloadTOAs(FetchType),
 
     // ---- Pipeline ----------------------------------------------------------
     /// Load files to set up pipeline job.
@@ -135,6 +147,16 @@ impl std::fmt::Debug for Request {
                 .field("pulsar", pulsar)
                 .field("master", master)
                 .finish(),
+
+            // Self::DownloadAllTOAs => write!(f, "DownloadAllTOAs"),
+            // Self::DownloadTOAById(id) => 
+            //     f.debug_tuple("DownloadTOAById")
+            //     .field(id)
+            //     .finish(),
+            Self::DownloadTOAs(ft) => 
+                f.debug_tuple("DownloadTOAs")
+                .field(ft)
+                .finish(),
             
             Self::SetupPipes { raw, ephemeride, template } => 
                 f.debug_struct("SetupPipes")
@@ -174,6 +196,8 @@ impl Request {
                         archivist.delete::<PulsarMeta>(id).await,
                     DataType::Ephemeride => 
                        archivist.delete::<ParMeta>(id).await,
+                    DataType::TOA => 
+                       archivist.delete::<TOAInfo>(id).await,
                 }
                 .map(|()| M::ItemDeleted(dt, id))
                 .map_err(ARPAError::from),
@@ -205,7 +229,21 @@ impl Request {
                 .map(|id| M::ItemAdded(DataType::Ephemeride, id)),
             Self::UpdatePar { id, path, pulsar, master } =>
                 overwrite_par(archivist, id, path, &pulsar, master).await
-                .map(|id| M::ItemAdded(DataType::Ephemeride, id)),                
+                .map(|id| M::ItemAdded(DataType::Ephemeride, id)),     
+
+            // ---- TOAs ------------------------------------------------------
+            // Self::DownloadAllTOAs => archivist.get_all().await
+            //     .map(M::TOAs)
+            //     .map_err(ARPAError::from),
+            // Self::DownloadTOAById(id) => archivist.get(id).await
+            //     .map(M::SingleTOA)
+            //     .map_err(ARPAError::from),
+            Self::DownloadTOAs(FetchType::All) => archivist.get_all().await
+                .map(M::TOAs)
+                .map_err(ARPAError::from),
+            Self::DownloadTOAs(FetchType::Id(id)) => archivist.get(id).await
+                .map(M::SingleTOA)
+                .map_err(ARPAError::from),
           
             // ---- Pipeline --------------------------------------------------
             Self::SetupPipes { raw, ephemeride, template } => 

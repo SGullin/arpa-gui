@@ -1,9 +1,9 @@
 use std::mem::replace;
 
 use arpa::{conveniences::display_elapsed_time, data_types::{ParMeta, RawMeta, TemplateMeta}, pipeline::Status};
-use egui::{Context, RichText};
+use egui::{Button, Context, RichText};
 
-use crate::app::{helpers::{IconicButton, ICON_CHECK, ICON_CLEAR, ICON_CROSS, ICON_RUN, ICON_WRITE, MISSING_DATA}, Request, Syncher};
+use crate::app::{ephemerides::EphemerideApp, helpers::{IconicButton, ICON_ARROW, ICON_CHECK, ICON_CLEAR, ICON_CROSS, ICON_RUN, ICON_WRITE, MISSING_DATA}, Request, Syncher};
 
 #[derive(Debug, Default)]
 struct RunInfo {
@@ -34,13 +34,13 @@ enum PipeStage {
     Invalid, 
     Relaxed {
         raw: String,
-        ephemeride: String,
-        template: String,
+        ephemeride: i32,
+        template: i32,
     },
     SettingUp {
         raw: String,
-        ephemeride: String,
-        template: String,
+        ephemeride: i32,
+        template: i32,
     },
     SetUp {
         raw: RawMeta,
@@ -55,8 +55,8 @@ impl Default for PipeStage {
     fn default() -> Self {
         Self::Relaxed {
             raw: String::new(), 
-            ephemeride: String::new(), 
-            template: String::new(), 
+            ephemeride: 0, 
+            template: 0, 
         }
     }
 }
@@ -68,15 +68,16 @@ pub struct PipelineApp {
 impl PipelineApp {
     pub(crate) fn new() -> Self {
         Self {
-            state: PipeStage::Relaxed { 
-                raw: String::new(), 
-                ephemeride: String::new(), 
-                template: String::new(),
-            },
+            state: PipeStage::default(),
         }
     }
     
-    pub(crate) fn show(&mut self, ctx: &Context, archivist: &Syncher) {
+    pub(crate) fn show(
+        &mut self, 
+        ctx: &Context, 
+        archivist: &Syncher,
+        ephemeride_app: &EphemerideApp, 
+    ) {
         let state = replace(&mut self.state, PipeStage::Invalid);
 
         egui::CentralPanel::default().show(ctx, |ui| match state {
@@ -85,6 +86,7 @@ impl PipelineApp {
             PipeStage::Relaxed { mut raw, mut ephemeride, mut template } => {
                 Self::argument_entry(
                     ui, 
+                    ephemeride_app,
                     &mut raw, 
                     &mut ephemeride, 
                     &mut template, 
@@ -96,6 +98,7 @@ impl PipelineApp {
             PipeStage::SettingUp { mut raw, mut ephemeride, mut template } => {
                 Self::argument_entry(
                     ui, 
+                    ephemeride_app,
                     &mut raw, 
                     &mut ephemeride, 
                     &mut template, 
@@ -132,9 +135,10 @@ impl PipelineApp {
     
     fn argument_entry(
         ui: &mut egui::Ui, 
+        ephemeride_app: &EphemerideApp,
         raw: &mut String, 
-        ephemeride: &mut String, 
-        template: &mut String,
+        ephemeride: &mut i32, 
+        template: &mut i32,
         active: bool,
     ) {
         egui::Grid::new("args")
@@ -143,34 +147,44 @@ impl PipelineApp {
         .striped(true)
         .show(ui, |ui| {
             ui.label("");
-            ui.label("Path or ID");
+            ui.label("Path / ID");
             ui.end_row();
 
+            // ----------------------------------------------------------------
             ui.label("Raw file");
-            if active {
-                ui.text_edit_singleline(raw);
-            } 
-            else {
-                ui.label(raw.as_str());
-            }
+            ui.add_enabled(active, egui::TextEdit::singleline(raw)); 
             ui.end_row();
 
+            // ----------------------------------------------------------------
             ui.label("Ephemeride");
-            if active {
-                ui.text_edit_singleline(ephemeride);
-            } 
+            ui.add_enabled(
+                active, 
+                egui::DragValue::new(ephemeride).range(0..=i32::MAX),
+            );
+
+            let select_par = IconicButton::new(ICON_ARROW)
+                .on_hover_text("Grab selected from ephemeride tab.");
+
+            if let Some(id) = ephemeride_app.selected() {
+                let select_par = ui.add(select_par.enabled(true));
+                if select_par.clicked() { *ephemeride = id; }
+            }
             else {
-                ui.label(ephemeride.as_str());
+                ui.add(select_par.enabled(false));
             }
             ui.end_row();
 
+            // ----------------------------------------------------------------
             ui.label("Template");
-            if active {
-                ui.text_edit_singleline(template);
-            } 
-            else {
-                ui.label(template.as_str());
-            }
+            ui.add_enabled(
+                active, 
+                egui::DragValue::new(template).range(0..=i32::MAX)
+            );
+
+            ui.add(IconicButton::new(ICON_ARROW)
+                // .enabled(enabled)
+                .on_hover_text("Grab selected.")
+            );
             ui.end_row();
         });
     }
@@ -219,8 +233,8 @@ impl PipelineApp {
         archivist: &Syncher,
         ui: &mut egui::Ui, 
         raw: String, 
-        ephemeride: String, 
-        template: String,
+        ephemeride: i32, 
+        template: i32,
     ) {
         let mut new_state = false;
         ui.horizontal(|ui| {
@@ -229,7 +243,7 @@ impl PipelineApp {
             );
 
             let write = ui.add(IconicButton::new(ICON_WRITE)
-                .enabled(!raw.is_empty() && !template.is_empty())
+                .enabled(!raw.is_empty() && template > 0)
                 .on_hover_text("Load files and proceed to the next step.")
             );
 
@@ -239,11 +253,7 @@ impl PipelineApp {
             );
 
             if clear.clicked() {
-                self.state = PipeStage::Relaxed { 
-                    raw: String::new(),
-                    ephemeride: String::new(),
-                    template: String::new(),
-                };
+                self.state = PipeStage::default();
                 new_state = true;
             }
             if write.clicked() {
@@ -255,8 +265,8 @@ impl PipelineApp {
 
                 self.state = PipeStage::SettingUp {
                     raw: raw.to_string(),
-                    ephemeride: ephemeride.to_string(),
-                    template: template.to_string(),
+                    ephemeride,
+                    template,
                 };
                 new_state = true;
             }
@@ -310,18 +320,9 @@ impl PipelineApp {
             );
 
             if clear.clicked() {
-                self.state = PipeStage::Relaxed { 
-                    raw: String::new(),
-                    ephemeride: String::new(),
-                    template: String::new(),
-                };
+                self.state = PipeStage::default();
             }
             else if run.clicked() {
-                // archivist.request(Request::RunPipeline {
-                //     raw,
-                //     ephemeride,
-                //     template,
-                // });
                 archivist.run_pipeline(
                     raw,
                     ephemeride,
@@ -415,7 +416,8 @@ impl PipelineApp {
         });
 
         if msg_index == 9 || info.errored {
-            if ui.button("Start over").clicked() {
+            let restart = ui.add(Button::new("Start over"));
+            if restart.clicked() {
                 log::info!("Redoing!");
                 self.state = PipeStage::default();
             }

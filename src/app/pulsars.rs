@@ -35,7 +35,7 @@ const PULSAR_META_TABLE: [(&str, &str); 7] = [
 
 pub(crate) struct PulsarsApp {
     messages: Vec<StatusMessage>,
-    downloader: Downloader<PulsarMeta>,
+    pub downloader: Downloader<PulsarMeta>,
 
     sort_by: usize,
 
@@ -57,7 +57,7 @@ impl PulsarsApp {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, archivist: &Syncher) {
-        self.downloader.show(ctx);
+        self.downloader.action_bar(ctx);
 
         match self.downloader.action() {
             DownloaderAction::None => {}
@@ -127,16 +127,6 @@ impl PulsarsApp {
                 }
             }
         }
-    }
-
-    pub fn set_pulsars(&mut self, pulsars: Vec<PulsarMeta>) {
-        *self.downloader.data_mut() = pulsars;
-        self.reset_ui();
-    }
-
-    pub fn add_pulsar(&mut self, pulsar: PulsarMeta) {
-        self.downloader.add(pulsar);
-        self.reset_ui();
     }
 
     pub fn reset_ui(&mut self) {
