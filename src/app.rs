@@ -1,23 +1,43 @@
-use arpa::{pipeline::Status, ARPAError};
+use arpa::{ARPAError, pipeline::Status};
 use egui::{Align, FontId, Layout};
-use log::{debug, info, warn, error};
+use log::{debug, error, info, warn};
 
-pub(crate) mod helpers;
 pub(crate) mod ephemerides;
-pub(crate) mod pulsars;
+pub(crate) mod helpers;
 mod pipeline;
+pub(crate) mod pulsars;
+mod toas;
 
 use ephemerides::EphemerideApp;
 use helpers::{
-    confirm_button, icon, IconicButton, StatusMessage, StatusMessageSeverity, ICON_CROSS, ICON_REVERT, ICON_SAVE
+    ICON_CROSS, ICON_REVERT, ICON_SAVE, IconicButton, StatusMessage,
+    StatusMessageSeverity, confirm_button, icon,
 };
 use pulsars::PulsarsApp;
+use toas::TOAsApp;
 
 mod syncher;
-pub(crate) use syncher::{Message, Request, Syncher, DataType};
+pub(crate) use syncher::{DataType, Message, Request, Syncher};
 
 use crate::app::pipeline::PipelineApp;
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Tab {
+    Pulsars,
+    Ephemerides,
+    Templates,
+    Observatories,
+    TOAs,
+    Pipeline,
+}
+const TAB_FORMATS: &[(Tab, &str, &str)] = &[
+    (Tab::Pulsars, "💫", "Pulsars"),
+    (Tab::Ephemerides, "⚙", "Ephemerides"),
+    (Tab::Templates, "📄", "Templates"),
+    (Tab::Observatories, "📡", "Observatories"),
+    (Tab::TOAs, "📆", "TOAs"),
+    (Tab::Pipeline, "🔩", "Pipeline"),
+];
 pub struct Application {
     archivist: Syncher,
 
@@ -31,24 +51,9 @@ pub struct Application {
     /// Applets
     pulsars: PulsarsApp,
     ephemerides: EphemerideApp,
+    toas: TOAsApp,
     pipeline: PipelineApp,
 }
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-enum Tab {
-    Pulsars,
-    Ephemerides,
-    Templates,
-    Observatories,
-    Pipeline,
-}
-const TAB_FORMATS: &[(Tab, &str, &str)] = &[
-    (Tab::Pulsars, "★", "Pulsars"),
-    (Tab::Ephemerides, "⚙", "Ephemerides"),
-    (Tab::Templates, "📄", "Templates"),
-    (Tab::Observatories, "📡", "Observatories"),
-    (Tab::Pipeline, "🔩", "Pipeline"),
-];
 
 impl Application {
     pub(crate) fn new() -> Result<Self, ARPAError> {
@@ -64,6 +69,7 @@ impl Application {
 
             pulsars: PulsarsApp::new(),
             ephemerides: EphemerideApp::new(),
+            toas: TOAsApp::new(),
             pipeline: PipelineApp::new(),
         })
     }
@@ -97,7 +103,7 @@ impl Application {
                 for (t, i, h) in TAB_FORMATS {
                     ui.selectable_value(&mut self.tab, *t, icon(i))
                         .on_hover_text(*h);
-                };
+                }
 
                 ui.with_layout(
                     Layout::bottom_up(egui::Align::Center)
@@ -135,7 +141,7 @@ impl Application {
         if save.clicked() {
             self.archivist.request(Request::Commit);
         }
-        if confirm_button(rollback_button, "Roll back?") {
+        if confirm_button(&rollback_button, "Roll back?") {
             self.archivist.request(Request::Rollback);
         }
     }
@@ -179,53 +185,63 @@ impl Application {
                 self.pulsars.reset_ui();
                 self.ephemerides.reset_ui();
                 self.pipeline.reset();
-            },
+            }
             Message::Connected => self.info(&"Connected!"),
             Message::CommitSuccess => {
                 self.info(&"Commit successful! (list not updated)");
 
                 self.has_live_transaction = false;
-            },
+            }
             Message::RollbackSuccess => {
                 self.info(&"Rollback successful!");
                 self.has_live_transaction = false;
-            },
+            }
             Message::ItemAdded(dt, id) => {
                 self.info(&format!("Successfully added {dt} #{id}"));
-                self.reset_part(dt);
+                self.reset_part(&dt);
                 self.has_live_transaction = true;
-            },
+            }
             Message::ItemDeleted(dt, id) => {
                 self.info(&format!("Successfully deleted {dt} #{id}"));
-                self.reset_part(dt);
+                self.reset_part(&dt);
                 self.has_live_transaction = true;
-            },
+            }
             Message::ItemUpdated(dt, id) => {
                 self.info(&format!("Successfully updated {dt} #{id}"));
                 self.has_live_transaction = true;
-            },
+            }
             Message::Pulsars(pulsars) => {
                 if pulsars.is_empty() {
                     self.warn(&"No pulsars to download!");
                 }
-                self.pulsars.set_pulsars(pulsars)
-            },
-            Message::SinglePulsar(pulsar) => self.pulsars.add_pulsar(pulsar),
+                self.pulsars.downloader.set(pulsars);
+            }
+            Message::SinglePulsar(pulsar) => {
+                self.pulsars.downloader.add(pulsar);
+            }
+
             Message::Ephemerides(pars) => {
                 if pars.is_empty() {
                     self.warn(&"No ephemerides to download!");
                 }
-                self.ephemerides.set_pars(pars);
-            },
-            Message::SingleEphemeride(par) => self.ephemerides.add_par(par),
-            Message::PipesSetUp(raw_meta, par_meta, template_meta) => 
-                self.pipeline.set_up(raw_meta, par_meta, template_meta),
+                self.ephemerides.downloader.set(pars);
+            }
+            Message::SingleEphemeride(par) => {
+                self.ephemerides.downloader.add(par);
+            }
+
+            Message::TOAs(toas) => self.toas.downloader.set(toas),
+            Message::SingleTOA(toa) => self.toas.downloader.add(toa),
+
+            Message::PipesSetUp(raw_meta, par_meta, template_meta) => {
+                self.pipeline.set_up(raw_meta, par_meta, template_meta);
+            }
             Message::PipelineStatus(s) => {
                 if let Status::Error(err) = &s {
                     self.error(err);
                 }
                 self.pipeline.set_status(s);
-            },
+            }
             Message::PipelineFinished => self.info(&"Pipeline finished!"),
         }
     }
@@ -254,11 +270,12 @@ impl Application {
         });
         self.pipeline.interrupt();
     }
-    
-    fn reset_part(&mut self, dt: DataType) {
+
+    fn reset_part(&mut self, dt: &DataType) {
         match dt {
             DataType::Pulsar => self.pulsars.deselect(),
             DataType::Ephemeride => self.ephemerides.deselect(),
+            DataType::Toa => self.toas.deselect(),
         }
     }
 }
@@ -284,8 +301,13 @@ impl eframe::App for Application {
                     self.tab = Tab::Pulsars;
                     self.pulsars.select_with_id(id);
                 }
-            },
-            Tab::Pipeline => self.pipeline.show(ctx, &self.archivist),
+            }
+
+            Tab::TOAs => self.toas.show(ctx, &self.archivist),
+
+            Tab::Pipeline => {
+                self.pipeline.show(ctx, &self.archivist, &self.ephemerides);
+            }
 
             _ => {
                 egui::CentralPanel::default()

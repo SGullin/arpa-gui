@@ -5,51 +5,103 @@ use std::{
 
 use arpa::{ARPAError, data_types::PulsarMeta};
 use egui::RichText;
-use egui_extras::{Column, TableBuilder};
-use rayon::slice::ParallelSliceMut;
 
-use crate::{
-    app::{DataType, Request, Syncher,
-        helpers::{
-            confirm_button, 
-            downloader::{Downloader, DownloaderAction, FetchType}, 
-            enter_data_option, format_data_option, format_unique_data_option, table_header, 
-            IconicButton, StatusMessage, StatusMessageSeverity, 
-            ICON_CLEAR, ICON_INSERT, ICON_WRITE
-        },
+use crate::app::{
+    Request, Syncher,
+    helpers::{
+        ICON_CLEAR, ICON_INSERT, ICON_WRITE, IconicButton, StatusMessage,
+        StatusMessageSeverity, confirm_button,
+        downloader::{self, Downloader, DownloaderAction},
+        enter_data_option, format_data_option, format_unique_data_option,
+        opt_cmp,
     },
 };
+const DATA_TYPE: crate::app::DataType = crate::app::DataType::Pulsar;
 
-const PULSAR_META_TABLE: [(&str, &str); 7] = [
-    ("ID", "The automatically generated ID."),
-    (
-        "Alias",
-        "An alias for the pulsar, often the same as the J name",
-    ),
-    ("J name", "Optional."),
-    ("B name", "Optional."),
-    ("RA", "J2000 right ascension, optional."),
-    ("DEC", "J2000 declination, optional."),
-    (".par id", "Master ephemeride file id"),
-];
+impl downloader::Item for PulsarMeta {
+    const NAME: &str = "pulsar";
+    const COLUMNS: &[(&str, &str)] = &[
+        ("ID", "The automatically generated ID."),
+        (
+            "Alias",
+            "An alias for the pulsar, often the same as the J name",
+        ),
+        ("J name", "Optional."),
+        ("B name", "Optional."),
+        ("RA", "J2000 right ascension, optional."),
+        ("DEC", "J2000 declination, optional."),
+        (".par id", "Master ephemeride file id"),
+    ];
 
-pub(crate) struct PulsarsApp {
+    fn id(&self) -> i32 {
+        self.id
+    }
+
+    fn format(&self, row: &mut egui_extras::TableRow) {
+        // id
+        row.col(|ui| {
+            ui.label(self.id.to_string());
+        });
+
+        // names
+        row.col(|ui| {
+            ui.label(RichText::new(&self.alias).strong());
+        });
+        row.col(|ui| {
+            ui.label(format_unique_data_option(
+                self.j_name.as_ref(),
+                &self.alias,
+            ));
+        });
+        row.col(|ui| {
+            ui.label(format_unique_data_option(
+                self.b_name.as_ref(),
+                &self.alias,
+            ));
+        });
+        // coords
+        row.col(|ui| {
+            ui.label(format_data_option(self.j2000_ra.as_ref()));
+        });
+        row.col(|ui| {
+            ui.label(format_data_option(self.j2000_dec.as_ref()));
+        });
+        // par
+        row.col(|ui| {
+            ui.label(format_data_option(self.master_parfile_id.as_ref()));
+        });
+    }
+
+    fn cmp_by(&self, other: &Self, index: usize) -> std::cmp::Ordering {
+        match index {
+            0 => self.id.cmp(&other.id),
+            1 => self.alias.cmp(&other.alias),
+            2 => opt_cmp(self.j_name.as_ref(), other.j_name.as_ref()),
+            3 => opt_cmp(self.b_name.as_ref(), other.b_name.as_ref()),
+            4 => opt_cmp(self.j2000_ra.as_ref(), other.j2000_ra.as_ref()),
+            5 => opt_cmp(self.j2000_dec.as_ref(), other.j2000_dec.as_ref()),
+            6 => opt_cmp(
+                self.master_parfile_id.as_ref(),
+                other.master_parfile_id.as_ref(),
+            ),
+            _ => std::cmp::Ordering::Equal,
+        }
+    }
+}
+
+pub struct PulsarsApp {
     messages: Vec<StatusMessage>,
-    downloader: Downloader<PulsarMeta>,
-
-    sort_by: usize,
+    pub downloader: Downloader<PulsarMeta>,
 
     new_pulsar: PulsarMeta,
     pulsar_file: Option<PathBuf>,
 }
 
 impl PulsarsApp {
-    pub fn new() -> Self {
+    pub const fn new() -> Self {
         Self {
             messages: Vec::new(),
             downloader: Downloader::new(),
-
-            sort_by: 0,
 
             new_pulsar: PulsarMeta::null(),
             pulsar_file: None,
@@ -57,12 +109,15 @@ impl PulsarsApp {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, archivist: &Syncher) {
-        self.downloader.show(ctx);
+        self.downloader.action_bar(ctx);
 
         match self.downloader.action() {
             DownloaderAction::None => {}
             DownloaderAction::Delete(index) => match index {
-                Some(id) => archivist.request(Request::DeleteItem(DataType::Pulsar, id)),
+                Some(id) => {
+                    archivist.request(Request::DeleteItem(DATA_TYPE, id));
+                }
+
                 None => {
                     self.messages.push(StatusMessage {
                         severity: StatusMessageSeverity::Warning,
@@ -72,10 +127,7 @@ impl PulsarsApp {
             },
 
             DownloaderAction::Download(ft) => {
-                let request = match ft {
-                    FetchType::All => Request::DownloadAllPulsars,
-                    FetchType::Id(id) => Request::DownloadPulsarById(id),
-                };
+                let request = Request::Download(DATA_TYPE, ft);
                 archivist.request(request);
             }
         }
@@ -99,13 +151,13 @@ impl PulsarsApp {
 
         ctx.input(|i| {
             if let Some(df) = i.raw.dropped_files.first() {
-                self.pulsar_file = df.path.clone();
+                self.pulsar_file.clone_from(&df.path);
             }
         });
 
         // Handle input file
         if let Some(path) = self.pulsar_file.take() {
-            let results = match self.read_pulsars_from_file(path) {
+            let results = match Self::read_pulsars_from_file(path) {
                 Ok(rs) => rs,
                 Err(err) => {
                     self.messages.push(StatusMessage {
@@ -127,16 +179,6 @@ impl PulsarsApp {
                 }
             }
         }
-    }
-
-    pub fn set_pulsars(&mut self, pulsars: Vec<PulsarMeta>) {
-        *self.downloader.data_mut() = pulsars;
-        self.reset_ui();
-    }
-
-    pub fn add_pulsar(&mut self, pulsar: PulsarMeta) {
-        self.downloader.add(pulsar);
-        self.reset_ui();
     }
 
     pub fn reset_ui(&mut self) {
@@ -169,66 +211,11 @@ impl PulsarsApp {
         });
 
         ui.separator();
-        self.pulsar_table(ui);
-    }
-
-    fn pulsar_table(&mut self, ui: &mut egui::Ui) {
-        if self.downloader.data().is_empty() {
-            ui.label("No pulsars in memory!\n (Sync button below)");
-            return;
+        // self.pulsar_table(ui);
+        let selected = self.downloader.table(ui);
+        if let Some(i) = selected {
+            self.new_pulsar = self.downloader.data()[i].clone();
         }
-
-        let height = ui.available_height();
-        let table = TableBuilder::new(ui)
-            .striped(true)
-            .resizable(false)
-            .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-            .column(Column::auto())
-            .columns(Column::remainder(), 5)
-            .column(Column::auto())
-            .min_scrolled_height(0.0)
-            .max_scroll_height(height)
-            .sense(egui::Sense::click());
-
-        table
-            .header(24.0, |mut header| {
-                (0..7).for_each(|i| {
-                    header.col(|ui| {
-                        let sort = table_header(
-                            ui,
-                            PULSAR_META_TABLE[i].0,
-                            PULSAR_META_TABLE[i].1,
-                        );
-
-                        if sort {
-                            self.sort_by = i;
-                            self.sort_table();
-                        }
-                    });
-                })
-            })
-            .body(|mut body| {
-                let mut clicked = None;
-                for (index, item) in self.downloader.data().iter().enumerate() {
-                    body.row(18.0, |mut row| {
-                        row.set_selected(
-                            self.downloader.selected() == Some(index),
-                        );
-
-                        format_pulsar_meta(item, &mut row);
-
-                        if row.response().clicked() {
-                            clicked = Some(index);
-                        }
-                    });
-                }
-
-                if let Some(i) =
-                    clicked.map(|i| self.downloader.select(i)).flatten()
-                {
-                    self.new_pulsar = self.downloader.data()[i].clone();
-                }
-            });
     }
 
     fn pulsar_data_entry(&mut self, ui: &mut egui::Ui) {
@@ -262,14 +249,14 @@ impl PulsarsApp {
     fn pulsar_data_controls(&mut self, ui: &mut egui::Ui, archivist: &Syncher) {
         ui.vertical(|ui| {
             ui.add_space(6.0);
-            let clear =
-                ui.add(IconicButton::new(ICON_CLEAR)
-                    .on_hover_text("Clear fields"));
+            let clear = ui.add(
+                IconicButton::new(ICON_CLEAR).on_hover_text("Clear fields"),
+            );
 
             ui.add_space(2.0);
-            let new =
-                ui.add(IconicButton::new(ICON_INSERT)
-                    .on_hover_text("Insert new"));
+            let new = ui.add(
+                IconicButton::new(ICON_INSERT).on_hover_text("Insert new"),
+            );
             ui.add_space(2.0);
             let overwrite = ui.add(
                 IconicButton::new(ICON_WRITE)
@@ -294,7 +281,7 @@ impl PulsarsApp {
                 archivist.request(Request::AddPulsar(meta));
             }
 
-            if confirm_button(overwrite, "Overwrite selected?") {
+            if confirm_button(&overwrite, "Overwrite selected?") {
                 if let Err(err) = self.new_pulsar.verify() {
                     self.messages.push(StatusMessage {
                         severity: StatusMessageSeverity::Error,
@@ -325,20 +312,19 @@ impl PulsarsApp {
     }
 
     fn read_pulsars_from_file(
-        &mut self,
         path: PathBuf,
     ) -> Result<Vec<Result<PulsarMeta, ARPAError>>, ARPAError> {
         let reader = BufReader::new(std::fs::File::open(path)?);
         let results = reader
             .lines()
-            .filter_map(|l| l.ok())
+            .map_while(std::result::Result::ok)
             .map(|l| {
                 l.split_whitespace().map(str::to_string).collect::<Vec<_>>()
             })
-            .filter(|l| l.first().map(|w| !w.starts_with('#')).unwrap_or(false))
+            .filter(|l| l.first().is_some_and(|w| !w.starts_with('#')))
             .map(|ws| {
                 PulsarMeta::from_strs(
-                    &ws.iter().map(|w| w.as_str()).collect::<Vec<_>>(),
+                    &ws.iter().map(String::as_str).collect::<Vec<_>>(),
                 )
             })
             .collect();
@@ -346,75 +332,13 @@ impl PulsarsApp {
         Ok(results)
     }
 
-    fn sort_table(&mut self) {
-        use PulsarMeta as PM;
-
-        let compare = match self.sort_by {
-            0 => |a: &PM, b: &PM| a.id.cmp(&b.id),
-            1 => |a: &PM, b: &PM| a.alias.cmp(&b.alias),
-            2 => |a: &PM, b: &PM| opt_cmp(&a.j_name, &b.j_name),
-            3 => |a: &PM, b: &PM| opt_cmp(&a.b_name, &b.b_name),
-            4 => |a: &PM, b: &PM| opt_cmp(&a.j2000_ra, &b.j2000_ra),
-            5 => |a: &PM, b: &PM| opt_cmp(&a.j2000_dec, &b.j2000_dec),
-            6 => |a: &PM, b: &PM| {
-                opt_cmp(&a.master_parfile_id, &b.master_parfile_id)
-            },
-            _ => return,
-        };
-        self.downloader.data_mut().par_sort_by(compare);
-    }
-    
     pub(crate) fn select_with_id(&mut self, id: i32) {
         let data = self.downloader.data();
-        for index in 0..data.len() {
-            if data[index].id == id {
+        for (index, item) in data.iter().enumerate() {
+            if item.id == id {
                 self.downloader.select(index);
                 return;
             }
         }
-    }
-}
-
-fn format_pulsar_meta(
-    psr: &PulsarMeta,
-    row: &mut egui_extras::TableRow<'_, '_>,
-) {
-    // id
-    row.col(|ui| {
-        ui.label(psr.id.to_string());
-    });
-
-    // names
-    row.col(|ui| {
-        ui.label(RichText::new(&psr.alias).strong());
-    });
-    row.col(|ui| {
-        ui.label(format_unique_data_option(&psr.j_name, &psr.alias));
-    });
-    row.col(|ui| {
-        ui.label(format_unique_data_option(&psr.b_name, &psr.alias));
-    });
-    // coords
-    row.col(|ui| {
-        ui.label(format_data_option(&psr.j2000_ra));
-    });
-    row.col(|ui| {
-        ui.label(format_data_option(&psr.j2000_dec));
-    });
-    // par
-    row.col(|ui| {
-        ui.label(format_data_option(&psr.master_parfile_id));
-    });
-}
-
-fn opt_cmp<T>(a: &Option<T>, b: &Option<T>) -> std::cmp::Ordering
-where
-    T: Ord,
-{
-    match (a, b) {
-        (None, None) => std::cmp::Ordering::Equal,
-        (None, Some(_)) => std::cmp::Ordering::Greater,
-        (Some(_), None) => std::cmp::Ordering::Less,
-        (Some(av), Some(bv)) => av.cmp(bv),
     }
 }

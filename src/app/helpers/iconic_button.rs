@@ -33,17 +33,17 @@ impl IconicButton {
         self
     }
 
-    pub fn enabled(mut self, enabled: bool) -> Self {
-        self.enabled = Some(enabled.into());
+    pub const fn enabled(mut self, enabled: bool) -> Self {
+        self.enabled = Some(enabled);
         self
     }
 
-    pub fn large(mut self) -> Self {
+    pub const fn large(mut self) -> Self {
         self.size = 2;
         self
     }
 
-    pub fn small(mut self) -> Self {
+    pub const fn small(mut self) -> Self {
         self.size = 0;
         self
     }
@@ -67,11 +67,11 @@ impl egui::Widget for IconicButton {
 
         if let Some(hint) = self.hint {
             response =
-                response.on_hover_text(&hint).on_disabled_hover_text(hint)
+                response.on_hover_text(&hint).on_disabled_hover_text(hint);
         }
 
         if let Some(hint) = self.disabled_hint {
-            response = response.on_disabled_hover_text(hint)
+            response = response.on_disabled_hover_text(hint);
         }
 
         response
