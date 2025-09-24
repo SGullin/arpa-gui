@@ -6,7 +6,7 @@ Current features:
 - pipeline.
 
 In the works:
-- templates;
+- templates.
 
 Planned features:
 - observers;
