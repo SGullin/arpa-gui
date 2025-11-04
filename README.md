@@ -1,2 +1,1 @@
-# arpa-gui
-Basic GUI for arpa
+# Coming soon...
